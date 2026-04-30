@@ -14,10 +14,14 @@ interface SegmentationCanvasProps {
   selectedCandidateId: string | null;
   overlayOpacity: number;
   disabled: boolean;
+  uploadDisabled: boolean;
   onSelectMask: (candidateId: string) => void;
+  onUploadImage: (file: File) => Promise<void>;
   onAddPoint: (point: PromptPoint) => void;
+  onRemovePoint: (pointId: string) => void;
   onSingleClickSegment: (point: PromptPoint) => void;
   onAddBox: (box: PromptBox) => void;
+  onRemoveBox: (boxId: string) => void;
 }
 
 interface ViewState {
@@ -66,17 +70,25 @@ export function SegmentationCanvas({
   selectedCandidateId,
   overlayOpacity,
   disabled,
+  uploadDisabled,
   onSelectMask,
+  onUploadImage,
   onAddPoint,
+  onRemovePoint,
   onSingleClickSegment,
   onAddBox,
+  onRemoveBox,
 }: SegmentationCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pendingClickRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const [view, setView] = useState<ViewState>({ x: 0, y: 0, scale: 1 });
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [draftBox, setDraftBox] = useState<PromptBox | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
+
+  const dataTransferHasFiles = (dataTransfer: DataTransfer | null) =>
+    Array.from(dataTransfer?.types ?? []).includes("Files");
 
   const fitToView = useCallback(() => {
     const container = containerRef.current;
@@ -172,6 +184,11 @@ export function SegmentationCanvas({
       return;
     }
 
+    if (event.button === 2) {
+      pendingClickRef.current = null;
+      return;
+    }
+
     const shouldPan = spacePressed || event.altKey || event.button === 1;
     if (shouldPan) {
       container.setPointerCapture(event.pointerId);
@@ -249,6 +266,11 @@ export function SegmentationCanvas({
       container.releasePointerCapture(event.pointerId);
     }
 
+    if (event.button === 2) {
+      pendingClickRef.current = null;
+      return;
+    }
+
     if (dragState?.kind === "box") {
       if (draftBox && draftBox.x1 - draftBox.x0 > 4 && draftBox.y1 - draftBox.y0 > 4) {
         onAddBox({ ...draftBox, id: crypto.randomUUID() });
@@ -288,6 +310,7 @@ export function SegmentationCanvas({
         x: point.x,
         y: point.y,
         label: mode === "positive_point" ? "positive" : "negative",
+        source: mode,
       });
       return;
     }
@@ -298,6 +321,7 @@ export function SegmentationCanvas({
         x: point.x,
         y: point.y,
         label: "positive",
+        source: "click",
       });
     }
   };
@@ -319,16 +343,98 @@ export function SegmentationCanvas({
     event.stopPropagation();
   };
 
+  const handleCanvasContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    pendingClickRef.current = null;
+  };
+
+  const handlePromptContextMenu = (
+    event: React.MouseEvent<SVGElement>,
+    removePrompt: () => void,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    pendingClickRef.current = null;
+    if (disabled) {
+      return;
+    }
+    removePrompt();
+  };
+
+  const handleDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    if (!uploadDisabled) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = uploadDisabled ? "none" : "copy";
+    if (!uploadDisabled) {
+      setIsDragOver(true);
+    }
+  };
+
+  const handleDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    const nextTarget = event.relatedTarget;
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    setIsDragOver(false);
+  };
+
+  const handleDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    if (!dataTransferHasFiles(event.dataTransfer)) {
+      return;
+    }
+
+    event.preventDefault();
+    setIsDragOver(false);
+
+    if (uploadDisabled) {
+      return;
+    }
+
+    const file = event.dataTransfer.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    await onUploadImage(file);
+  };
+
   return (
     <section className="viewer-shell">
       <div
         ref={containerRef}
-        className={`viewer-stage ${cursorClass}`}
+        className={`viewer-stage ${cursorClass} ${isDragOver ? "is-dragging" : ""}`.trim()}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onContextMenu={handleCanvasContextMenu}
       >
+        {isDragOver ? (
+          <div className="viewer-drop-overlay" aria-hidden="true">
+            <span className="viewer-drop-overlay-title">Drop image to upload</span>
+            <span className="viewer-drop-overlay-subtitle">
+              Replace the current canvas image and clear active prompts.
+            </span>
+          </div>
+        ) : null}
         {imageUrl ? (
           <>
             <div className="viewer-stage-hud viewer-stage-hud-top">
@@ -396,6 +502,9 @@ export function SegmentationCanvas({
                   y={box.y0}
                   width={box.x1 - box.x0}
                   height={box.y1 - box.y0}
+                  onContextMenu={(event) => {
+                    handlePromptContextMenu(event, () => onRemoveBox(box.id));
+                  }}
                 />
               ))}
               {draftBox ? (
@@ -408,7 +517,13 @@ export function SegmentationCanvas({
                 />
               ) : null}
               {points.map((point) => (
-                <g key={point.id} transform={`translate(${point.x}, ${point.y})`}>
+                <g
+                  key={point.id}
+                  transform={`translate(${point.x}, ${point.y})`}
+                  onContextMenu={(event) => {
+                    handlePromptContextMenu(event, () => onRemovePoint(point.id));
+                  }}
+                >
                   <circle
                     className={`prompt-point ${point.label === "positive" ? "positive" : "negative"}`}
                     r={9}

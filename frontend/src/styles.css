@@ -202,6 +202,7 @@ button {
 .field-note,
 .range-readout,
 .prompt-summary,
+.sample-list-subtitle,
 .viewer-toolbar-group.muted,
 .results-empty span {
   color: var(--muted);
@@ -341,6 +342,41 @@ button {
   margin-top: 8px;
 }
 
+.sample-list {
+  display: grid;
+  gap: 8px;
+}
+
+.sample-list-button {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(145, 175, 189, 0.18);
+  background: rgba(7, 17, 25, 0.78);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.sample-list-button.is-active {
+  border-color: rgba(45, 226, 207, 0.84);
+  background: rgba(45, 226, 207, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(45, 226, 207, 0.18);
+}
+
+.sample-list-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sample-list-title {
+  font-weight: 600;
+}
+
 .status-shell {
   padding: 14px 15px;
   margin-top: 0;
@@ -423,6 +459,35 @@ button {
     radial-gradient(circle at top left, rgba(45, 226, 207, 0.1), transparent 28%),
     linear-gradient(180deg, rgba(2, 6, 10, 0.8), rgba(8, 16, 24, 0.96));
   border: 1px solid rgba(145, 175, 189, 0.12);
+}
+
+.viewer-stage.is-dragging {
+  border-color: rgba(45, 226, 207, 0.72);
+  box-shadow: inset 0 0 0 1px rgba(45, 226, 207, 0.22);
+}
+
+.viewer-drop-overlay {
+  position: absolute;
+  inset: 14px;
+  z-index: 5;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+  border-radius: 18px;
+  border: 1px dashed rgba(45, 226, 207, 0.84);
+  background: rgba(4, 12, 18, 0.82);
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+}
+
+.viewer-drop-overlay-title {
+  font-size: 1.08rem;
+  font-weight: 700;
+}
+
+.viewer-drop-overlay-subtitle {
+  color: var(--muted);
 }
 
 .viewer-stage-hud {
@@ -539,6 +604,7 @@ button {
   stroke: rgba(45, 226, 207, 0.95);
   stroke-width: 2;
   stroke-dasharray: 8 6;
+  pointer-events: all;
 }
 
 .prompt-box.draft {
@@ -548,6 +614,7 @@ button {
 .prompt-point {
   stroke: rgba(3, 16, 22, 0.88);
   stroke-width: 2;
+  pointer-events: all;
 }
 
 .prompt-point.positive {
@@ -562,6 +629,7 @@ button {
   stroke: rgba(3, 16, 22, 0.94);
   stroke-width: 2;
   stroke-linecap: round;
+  pointer-events: all;
 }
 
 .mask-label-button {
@@ -621,7 +689,17 @@ button {
 }
 
 .results-overlay-controls {
+  display: grid;
+  gap: 12px;
   margin-bottom: 12px;
+}
+
+.results-slider-group {
+  display: grid;
+}
+
+.results-filter-note {
+  margin: 0 0 12px;
 }
 
 .warnings-card {
@@ -668,6 +746,22 @@ button {
 .mask-card.is-active {
   border-color: rgba(45, 226, 207, 0.84);
   box-shadow: inset 0 0 0 1px rgba(45, 226, 207, 0.2);
+}
+
+.mask-card.is-below-threshold {
+  color: rgba(237, 246, 251, 0.58);
+  border-color: rgba(145, 175, 189, 0.1);
+  background: rgba(5, 12, 18, 0.56);
+  cursor: not-allowed;
+}
+
+.mask-card.is-below-threshold .mask-card-preview {
+  background: rgba(7, 17, 25, 0.56);
+}
+
+.mask-card.is-below-threshold img {
+  filter: grayscale(1);
+  opacity: 0.5;
 }
 
 .mask-card-preview {

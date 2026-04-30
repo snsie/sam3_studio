@@ -16,11 +16,14 @@ export type InteractionMode =
 
 export type PointLabel = "positive" | "negative";
 
+export type PromptPointSource = "click" | "positive_point" | "negative_point";
+
 export interface PromptPoint {
   id: string;
   x: number;
   y: number;
   label: PointLabel;
+  source: PromptPointSource;
 }
 
 export interface PromptBox {
@@ -81,12 +84,6 @@ export interface SessionInfoResponse extends UploadResponse {
 export interface SessionResetResponse {
   session_id: string;
   reset: boolean;
-}
-
-export interface JobSubmissionResponse {
-  job_id: string;
-  status: JobStatus;
-  status_url: string;
 }
 
 export interface JobStatusResponse {

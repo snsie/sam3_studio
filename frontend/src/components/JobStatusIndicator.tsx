@@ -1,11 +1,11 @@
 import type { JobStatusResponse } from "../types";
 
 const LABELS: Record<JobStatusResponse["status"], string> = {
-  queued: "Queued",
-  loading_model: "Loading model",
+  queued: "Waiting",
+  loading_model: "Preparing worker",
   loading_image_embeddings: "Computing image embeddings",
-  running_segmentation: "Running segmentation",
-  packaging_masks: "Packaging masks",
+  running_segmentation: "Segmenting",
+  packaging_masks: "Finalizing",
   complete: "Complete",
   failed: "Failed",
 };
@@ -20,7 +20,7 @@ export function JobStatusIndicator({ job }: JobStatusIndicatorProps) {
       <div className="status-shell idle">
         <div>
           <span className="status-label">Idle</span>
-          <p>Upload an image and submit prompts to start a local SAM3 job.</p>
+          <p>Upload an image and submit prompts to queue a local SAM3 segmentation request.</p>
         </div>
       </div>
     );

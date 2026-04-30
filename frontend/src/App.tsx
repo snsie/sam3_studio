@@ -1,8 +1,9 @@
-import { startTransition, useDeferredValue, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createSegmentationJob,
-  getJobStatus,
+  listSampleImages,
+  loadSampleImage,
   resetSessionCache,
   uploadImage,
 } from "./api/client";
@@ -10,6 +11,7 @@ import { ImageUploader } from "./components/ImageUploader";
 import { JobStatusIndicator } from "./components/JobStatusIndicator";
 import { PromptToolbar } from "./components/PromptToolbar";
 import { ResultsPanel } from "./components/ResultsPanel";
+import { SamplesPanel } from "./components/SamplesPanel";
 import { SegmentationCanvas } from "./components/SegmentationCanvas";
 import { TextPromptInput } from "./components/TextPromptInput";
 import type {
@@ -22,7 +24,7 @@ import type {
   UploadResponse,
 } from "./types";
 
-const POLL_INTERVAL_MS = 700;
+const DEFAULT_CONFIDENCE_THRESHOLD = 0.5;
 
 function resolveInteractionMode(
   mode: InteractionMode,
@@ -58,6 +60,25 @@ function promptsToRequest(
   };
 }
 
+function isAccumulatedPointMode(mode: InteractionMode) {
+  return mode === "positive_point" || mode === "negative_point";
+}
+
+function createPendingJobStatus(sessionId: string): JobStatusResponse {
+  const now = new Date().toISOString();
+  return {
+    job_id: `pending-${Date.now()}`,
+    session_id: sessionId,
+    status: "queued",
+    progress: 0.05,
+    message: "Waiting for available model...",
+    created_at: now,
+    updated_at: now,
+    result: null,
+    error: null,
+  };
+}
+
 export default function App() {
   const [session, setSession] = useState<UploadResponse | null>(null);
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("click");
@@ -67,50 +88,94 @@ export default function App() {
   const [job, setJob] = useState<JobStatusResponse | null>(null);
   const [result, setResult] = useState<SegmentationResult | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(DEFAULT_CONFIDENCE_THRESHOLD);
   const [overlayOpacity, setOverlayOpacity] = useState(0.65);
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [samples, setSamples] = useState<string[]>([]);
+  const [samplesErrorMessage, setSamplesErrorMessage] = useState<string | null>(null);
+  const [isLoadingSamples, setIsLoadingSamples] = useState(true);
+  const hasAttemptedInitialSampleLoad = useRef(false);
 
   const deferredResult = useDeferredValue(result);
 
-  const visibleMasks = useMemo(() => {
+  useEffect(() => {
+    let isCurrent = true;
+
+    const loadSamples = async () => {
+      try {
+        const nextSamples = await listSampleImages();
+        if (!isCurrent) {
+          return;
+        }
+        setSamples(nextSamples);
+        setSamplesErrorMessage(null);
+      } catch (error) {
+        if (!isCurrent) {
+          return;
+        }
+        setSamplesErrorMessage(
+          error instanceof Error ? error.message : "Unable to load sample images.",
+        );
+      } finally {
+        if (isCurrent) {
+          setIsLoadingSamples(false);
+        }
+      }
+    };
+
+    void loadSamples();
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  const visibleCandidates = useMemo(() => {
     if (!deferredResult || deferredResult.candidates.length === 0) {
       return [];
     }
+
+    return deferredResult.candidates.filter(
+      (candidate) => typeof candidate.score === "number" && candidate.score > confidenceThreshold,
+    );
+  }, [confidenceThreshold, deferredResult]);
+
+  useEffect(() => {
     if (selectedCandidateId === null) {
-      return deferredResult.candidates;
+      return;
     }
-    const selectedCandidate = deferredResult.candidates.find(
+
+    const hasSelectedCandidate = visibleCandidates.some(
       (candidate) => candidate.candidate_id === selectedCandidateId,
     );
-    return selectedCandidate ? [selectedCandidate] : deferredResult.candidates;
-  }, [deferredResult, selectedCandidateId]);
+    if (!hasSelectedCandidate) {
+      setSelectedCandidateId(null);
+    }
+  }, [selectedCandidateId, visibleCandidates]);
 
-  const beginPolling = (jobId: string) => {
-    const timer = window.setInterval(async () => {
-      try {
-        const nextJob = await getJobStatus(jobId);
-        startTransition(() => {
-          setJob(nextJob);
-          if (nextJob.status === "complete") {
-            setResult(nextJob.result);
-            setSelectedCandidateId(null);
-            setIsSubmitting(false);
-            window.clearInterval(timer);
-          }
-          if (nextJob.status === "failed") {
-            setErrorMessage(nextJob.error ?? nextJob.message);
-            setIsSubmitting(false);
-            window.clearInterval(timer);
-          }
-        });
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Polling failed.");
-        setIsSubmitting(false);
-        window.clearInterval(timer);
-      }
-    }, POLL_INTERVAL_MS);
+  const visibleMasks = useMemo(() => {
+    if (visibleCandidates.length === 0) {
+      return [];
+    }
+    if (selectedCandidateId === null) {
+      return visibleCandidates;
+    }
+    const selectedCandidate = visibleCandidates.find(
+      (candidate) => candidate.candidate_id === selectedCandidateId,
+    );
+    return selectedCandidate ? [selectedCandidate] : visibleCandidates;
+  }, [selectedCandidateId, visibleCandidates]);
+
+  const applyUploadedSession = (uploaded: UploadResponse) => {
+    setSession(uploaded);
+    setPoints([]);
+    setBoxes([]);
+    setJob(null);
+    setResult(null);
+    setSelectedCandidateId(null);
+    setTextPrompt("");
   };
 
   const handleUpload = async (file: File) => {
@@ -118,13 +183,7 @@ export default function App() {
       setIsUploading(true);
       setErrorMessage(null);
       const uploaded = await uploadImage(file);
-      setSession(uploaded);
-      setPoints([]);
-      setBoxes([]);
-      setJob(null);
-      setResult(null);
-      setSelectedCandidateId(null);
-      setTextPrompt("");
+      applyUploadedSession(uploaded);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Upload failed.");
     } finally {
@@ -132,28 +191,66 @@ export default function App() {
     }
   };
 
+  const handleSampleSelect = async (filename: string) => {
+    try {
+      setIsUploading(true);
+      setErrorMessage(null);
+      const uploaded = await loadSampleImage(filename);
+      applyUploadedSession(uploaded);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Sample load failed.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (hasAttemptedInitialSampleLoad.current || session || samples.length === 0) {
+      return;
+    }
+
+    hasAttemptedInitialSampleLoad.current = true;
+    void handleSampleSelect(samples[0]);
+  }, [handleSampleSelect, samples, session]);
+
   const handleSubmit = async (request: SegmentationRequest) => {
     try {
       setErrorMessage(null);
       setIsSubmitting(true);
-      setJob(null);
-      const submitted = await createSegmentationJob(request);
-      setJob({
-        job_id: submitted.job_id,
-        session_id: request.session_id,
-        status: submitted.status,
-        progress: 0,
-        message: "Queued",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        result: null,
-        error: null,
+      setJob(createPendingJobStatus(request.session_id));
+
+      const completed = await createSegmentationJob(request);
+      startTransition(() => {
+        setJob(completed);
+        if (completed.status === "complete" && completed.result) {
+          setResult(completed.result);
+          setSelectedCandidateId(null);
+          return;
+        }
+        if (completed.status === "failed") {
+          setErrorMessage(completed.error ?? completed.message);
+          return;
+        }
+        setResult(null);
+        setErrorMessage("Segmentation finished without a usable result.");
       });
-      beginPolling(submitted.job_id);
     } catch (error) {
-      setIsSubmitting(false);
-      const message = error instanceof Error ? error.message : "Job submission failed.";
+      const message = error instanceof Error ? error.message : "Segmentation request failed.";
+      setJob((current) =>
+        current
+          ? {
+              ...current,
+              status: "failed",
+              progress: 1,
+              message: "Segmentation failed",
+              updated_at: new Date().toISOString(),
+              error: message,
+            }
+          : null,
+      );
       setErrorMessage(message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -194,8 +291,18 @@ export default function App() {
     }
   };
 
+  const handleInteractionModeChange = (nextMode: InteractionMode) => {
+    setInteractionMode(nextMode);
+    if (!isAccumulatedPointMode(nextMode)) {
+      return;
+    }
+
+    setPoints((current) => current.filter((point) => point.source !== "click"));
+  };
+
   const actionDisabled = !session || isSubmitting;
   const statusBusy = isSubmitting || isUploading;
+  const submitButtonLabel = isSubmitting ? "Waiting for model..." : "Run Segmentation";
 
   return (
     <div className="app-shell">
@@ -215,6 +322,15 @@ export default function App() {
             disabled={!session || statusBusy}
             value={textPrompt}
             onChange={setTextPrompt}
+            onSubmit={runCurrentPrompts}
+          />
+          <SamplesPanel
+            samples={samples}
+            currentFilename={session?.filename ?? null}
+            disabled={statusBusy}
+            isLoading={isLoadingSamples}
+            errorMessage={samplesErrorMessage}
+            onSelectSample={handleSampleSelect}
           />
 
           <section className="panel-block actions-block">
@@ -233,7 +349,7 @@ export default function App() {
               disabled={actionDisabled}
               onClick={runCurrentPrompts}
             >
-              {isSubmitting ? "Running..." : "Run Segmentation"}
+              {submitButtonLabel}
             </button>
             <button
               type="button"
@@ -266,7 +382,7 @@ export default function App() {
           <PromptToolbar
             disabled={statusBusy || !session}
             mode={interactionMode}
-            onModeChange={setInteractionMode}
+            onModeChange={handleInteractionModeChange}
           />
           <SegmentationCanvas
             imageUrl={session?.image_url ?? null}
@@ -279,9 +395,15 @@ export default function App() {
             selectedCandidateId={selectedCandidateId}
             overlayOpacity={overlayOpacity}
             disabled={!session || statusBusy}
+            uploadDisabled={statusBusy}
             onSelectMask={setSelectedCandidateId}
+            onUploadImage={handleUpload}
             onAddPoint={(point) => {
               setPoints((current) => [...current, point]);
+              setErrorMessage(null);
+            }}
+            onRemovePoint={(pointId) => {
+              setPoints((current) => current.filter((point) => point.id !== pointId));
               setErrorMessage(null);
             }}
             onSingleClickSegment={handleImmediateClick}
@@ -289,14 +411,21 @@ export default function App() {
               setBoxes((current) => [...current, box]);
               setErrorMessage(null);
             }}
+            onRemoveBox={(boxId) => {
+              setBoxes((current) => current.filter((box) => box.id !== boxId));
+              setErrorMessage(null);
+            }}
           />
         </section>
 
         <ResultsPanel
           result={result}
+          visibleCandidates={visibleCandidates}
           selectedCandidateId={selectedCandidateId}
+          confidenceThreshold={confidenceThreshold}
           overlayOpacity={overlayOpacity}
           onSelectCandidate={setSelectedCandidateId}
+          onConfidenceThresholdChange={setConfidenceThreshold}
           onOverlayOpacityChange={setOverlayOpacity}
           onShowAllMasks={() => setSelectedCandidateId(null)}
         />

@@ -14,12 +14,14 @@ case "${MODE}" in
     DEFAULT_BACKEND_PORT=8000
     BACKEND_EXTRA_ARGS=(--reload)
     FRONTEND_SCRIPT=dev
+    START_FRONTEND=true
     ;;
   prod)
     DEFAULT_FRONTEND_PORT=4173
     DEFAULT_BACKEND_PORT=8001
     BACKEND_EXTRA_ARGS=()
-    FRONTEND_SCRIPT=preview
+    FRONTEND_SCRIPT=""
+    START_FRONTEND=false
     ;;
   *)
     echo "Usage: ./run_studio.sh [dev|prod]"
@@ -30,9 +32,6 @@ esac
 FRONTEND_PORT="${FRONTEND_PORT:-${DEFAULT_FRONTEND_PORT}}"
 BACKEND_PORT="${BACKEND_PORT:-${DEFAULT_BACKEND_PORT}}"
 TARGET_PORTS=("${BACKEND_PORT}" "${FRONTEND_PORT}")
-DEFAULT_FRONTEND_ORIGINS="http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT}"
-FRONTEND_ORIGINS="${FRONTEND_ORIGINS:-${DEFAULT_FRONTEND_ORIGINS}}"
-PROD_API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT}/api}"
 FRONTEND_ENV=(
   "VITE_BACKEND_PORT=${VITE_BACKEND_PORT:-${BACKEND_PORT}}"
   "VITE_FRONTEND_PORT=${VITE_FRONTEND_PORT:-${FRONTEND_PORT}}"
@@ -42,12 +41,10 @@ if [[ -n "${VITE_API_BASE_URL:-}" ]]; then
   FRONTEND_ENV+=("VITE_API_BASE_URL=${VITE_API_BASE_URL}")
 fi
 
-BACKEND_ENV=(
-  "FRONTEND_ORIGINS=${FRONTEND_ORIGINS}"
-)
+BACKEND_ENV=()
 
-if [[ "${MODE}" == "prod" ]]; then
-  FRONTEND_ENV+=("VITE_API_BASE_URL=${PROD_API_BASE_URL}")
+if [[ -n "${FRONTEND_ORIGINS:-}" ]]; then
+  BACKEND_ENV+=("FRONTEND_ORIGINS=${FRONTEND_ORIGINS}")
 fi
 
 if ! command -v conda >/dev/null 2>&1; then
@@ -153,15 +150,21 @@ echo "Starting backend on port ${BACKEND_PORT} (${MODE})..."
 ) &
 PIDS+=("$!")
 
-echo "Starting frontend on port ${FRONTEND_PORT} (${MODE})..."
-(
-  cd "${FRONTEND_DIR}"
-  env "${FRONTEND_ENV[@]}" npm run "${FRONTEND_SCRIPT}" -- --host 0.0.0.0 --port "${FRONTEND_PORT}"
-) &
-PIDS+=("$!")
+if [[ "${START_FRONTEND}" == "true" ]]; then
+  echo "Starting frontend on port ${FRONTEND_PORT} (${MODE})..."
+  (
+    cd "${FRONTEND_DIR}"
+    env "${FRONTEND_ENV[@]}" npm run "${FRONTEND_SCRIPT}" -- --host 0.0.0.0 --port "${FRONTEND_PORT}"
+  ) &
+  PIDS+=("$!")
+fi
 
-echo "Frontend: http://localhost:${FRONTEND_PORT}"
-echo "Backend:  http://localhost:${BACKEND_PORT}"
+if [[ "${MODE}" == "prod" ]]; then
+  echo "App:      http://localhost:${BACKEND_PORT}"
+else
+  echo "Frontend: http://localhost:${FRONTEND_PORT}"
+  echo "Backend:  http://localhost:${BACKEND_PORT}"
+fi
 
 set +e
 wait -n "${PIDS[@]}"

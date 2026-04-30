@@ -7,6 +7,12 @@ export default defineConfig(({ mode }) => {
   const backendPort = env.VITE_BACKEND_PORT ?? (mode === "production" ? "8001" : "8000");
   const configuredApiBaseUrl = (env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
   const apiBaseUrl = configuredApiBaseUrl || `http://localhost:${backendPort}`;
+  const configuredAllowedHosts = (env.VITE_ALLOWED_HOSTS ?? env.ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((host) => host.trim())
+    .filter(Boolean)
+  const allowedHosts =
+    configuredAllowedHosts.length > 0 ? configuredAllowedHosts : ['faiht.ai', 'www.faiht.ai']
 
   return {
     plugins: [react()],
@@ -14,6 +20,7 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: frontendPort,
       strictPort: true,
+      allowedHosts,
       proxy: {
         "/api": {
           target: apiBaseUrl,
@@ -25,6 +32,7 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: frontendPort,
       strictPort: true,
+      allowedHosts
     },
   };
 });

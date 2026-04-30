@@ -1,6 +1,6 @@
 # SAM3 Studio
 
-SAM3 Studio is a local FastAPI + React research/demo app for interactive exploration of the installed `sam3` package. It supports image upload, click-to-segment, positive/negative point prompts, box prompts, experimental text prompting, candidate-mask switching, overlay opacity control, and progressive job status updates backed by a local in-process queue.
+SAM3 Studio is a local FastAPI + React research/demo app for interactive exploration of the installed `sam3` package. It supports image upload, click-to-segment, positive/negative point prompts, box prompts, experimental text prompting, candidate-mask switching, overlay opacity control, and synchronous segmentation requests backed by a local in-process queue and worker pool.
 
 ## Stack
 
@@ -60,7 +60,15 @@ Important variables:
 - `SAM3_CHECKPOINT_PATH=/absolute/path/to/checkpoint.pt`
 - `SAM3_BPE_PATH=/absolute/path/to/bpe.model`
 - `SAM3_LOAD_FROM_HF=true|false`
+- `SAM3_WORKER_COUNT=3`
+- `SAM3_QUEUE_MAX_SIZE=0`
+- `SAM3_REQUEST_TIMEOUT_SECONDS=300`
 - `SAM3_CONFIDENCE_THRESHOLD=0.5`
+- `FRONTEND_ORIGINS=https://faiht.ai,https://www.faiht.ai`
+
+Optional frontend variable:
+
+- `VITE_SEGMENTATION_TIMEOUT_MS=300000`
 
 If you want the app to stay strictly offline after startup, provide local checkpoint assets and set `SAM3_LOAD_FROM_HF=false`.
 
@@ -73,7 +81,7 @@ conda activate sam3
 ./scripts/run_backend.sh
 ```
 
-The backend preloads the SAM3 model during startup so the first prompt does not pay the model-load penalty. If checkpoints or tokenizer assets are misconfigured, the backend now fails fast during startup instead of on the first segmentation request.
+The backend preloads a pool of SAM3 workers during startup so the first prompt does not pay the model-load penalty. By default it tries to load three independent model instances in the FastAPI process. If the GPU cannot fit the requested worker count, startup now either reduces the pool with an explicit warning or fails fast with a clear error.
 
 Start the frontend in another terminal:
 
@@ -83,13 +91,31 @@ Start the frontend in another terminal:
 
 Open `http://localhost:5173`.
 
+## Run In Production
+
+From the repository root:
+
+```bash
+./run_studio.sh prod
+```
+
+Production mode now builds the Vite frontend and serves both the UI and `/api` routes from the FastAPI process on `http://localhost:8001`. This is the mode to place behind `faiht.ai`.
+
+For the `faiht.ai` deployment:
+
+- Point `faiht.ai` and `www.faiht.ai` at the VM.
+- Use Caddy to reverse-proxy all traffic to `http://127.0.0.1:8001`.
+- Add the `faiht.ai` and `www.faiht.ai` site block to the Caddyfile you already run on the server.
+- Once DNS is pointed at the VM, Caddy can provision TLS automatically for both hostnames.
+- If you terminate TLS or serve the frontend from a different origin, set `FRONTEND_ORIGINS` explicitly in `backend/.env`.
+
 ## Workflow
 
 1. Upload an image.
 2. Choose an interaction mode.
 3. Place points or drag a box directly on the canvas, or enter a text prompt.
 4. Run segmentation, or use `Click` mode for immediate single-click mask generation.
-5. Polling updates show job state while the backend processes the request.
+5. If all model workers are busy, the request waits in the in-memory FIFO queue until a worker becomes available.
 6. Inspect returned masks, switch between candidates, and tune overlay opacity.
 
 ## Backend API Summary
@@ -98,12 +124,13 @@ Open `http://localhost:5173`.
 - `GET /api/sessions/{session_id}`: fetch session metadata
 - `GET /api/sessions/{session_id}/image`: fetch the normalized uploaded image
 - `POST /api/sessions/{session_id}/reset-cache`: clear cached embeddings for the session
-- `POST /api/segment/jobs`: enqueue a segmentation job
-- `GET /api/jobs/{job_id}`: poll job status and retrieve results
+- `POST /api/segment/jobs`: enqueue a segmentation job and hold the request open until the queued job completes
+- `GET /api/jobs/{job_id}`: inspect queued/running/completed job status for compatibility or debugging
 
 ## Development Notes
 
-- The job queue is intentionally simple: one in-process worker thread for maintainable local research/demo use.
+- The inference queue is intentionally simple: one in-process FIFO dispatcher plus a fixed pool of independently loaded SAM3 workers.
+- By default, only three segmentation jobs run at the same time on the single VM GPU while additional HTTP requests wait in memory.
 - Uploaded images are normalized to PNG and stored temporarily in `backend/data/uploads/`.
 - The frontend uses Vite dev-server proxying to forward `/api` calls to the local FastAPI backend.
 - Multiple mask candidates are returned when SAM3 provides them; the UI lets you switch the active overlay.

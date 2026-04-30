@@ -1,12 +1,21 @@
 import type {
   JobStatusResponse,
-  JobSubmissionResponse,
   SegmentationRequest,
   SessionResetResponse,
   UploadResponse,
 } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+const DEFAULT_SEGMENTATION_TIMEOUT_MS = 300_000;
+
+function resolveSegmentationTimeoutMs(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SEGMENTATION_TIMEOUT_MS;
+}
+
+const SEGMENTATION_TIMEOUT_MS = resolveSegmentationTimeoutMs(
+  import.meta.env.VITE_SEGMENTATION_TIMEOUT_MS,
+);
 
 class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -33,6 +42,29 @@ async function parseResponse<T>(response: Response): Promise<T> {
   throw new ApiError(message || "Request failed", response.status);
 }
 
+async function fetchWithTimeout(
+  input: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError(
+        "Segmentation request timed out while waiting for an available model.",
+        504,
+      );
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 export async function uploadImage(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -45,18 +77,31 @@ export async function uploadImage(file: File): Promise<UploadResponse> {
   return parseResponse<UploadResponse>(response);
 }
 
+export async function listSampleImages(): Promise<string[]> {
+  const response = await fetch(`${API_BASE}/samples`);
+  return parseResponse<string[]>(response);
+}
+
+export async function loadSampleImage(filename: string): Promise<UploadResponse> {
+  const response = await fetch(`${API_BASE}/samples/${encodeURIComponent(filename)}/load`, {
+    method: "POST",
+  });
+
+  return parseResponse<UploadResponse>(response);
+}
+
 export async function createSegmentationJob(
   payload: SegmentationRequest,
-): Promise<JobSubmissionResponse> {
-  const response = await fetch(`${API_BASE}/segment/jobs`, {
+): Promise<JobStatusResponse> {
+  const response = await fetchWithTimeout(`${API_BASE}/segment/jobs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
-  });
+  }, SEGMENTATION_TIMEOUT_MS);
 
-  return parseResponse<JobSubmissionResponse>(response);
+  return parseResponse<JobStatusResponse>(response);
 }
 
 export async function getJobStatus(jobId: string): Promise<JobStatusResponse> {
