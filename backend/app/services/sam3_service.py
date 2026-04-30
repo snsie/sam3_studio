@@ -368,12 +368,7 @@ class SAM3Service:
         scores = self._to_numpy(scores_tensor)
         boxes = self._to_numpy(boxes_tensor)
 
-        warnings: list[str] = []
-        if payload.boxes:
-            warnings.append(
-                "Text prompting is using SAM3 grounding with geometric box prompts, not the interactive point/box predictor."
-            )
-        return masks, scores, boxes, warnings
+        return masks, scores, boxes, []
 
     def _apply_text_guidance(
         self,

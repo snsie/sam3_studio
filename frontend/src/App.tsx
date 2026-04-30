@@ -8,7 +8,6 @@ import {
 } from "./api/client";
 import { ImageUploader } from "./components/ImageUploader";
 import { JobStatusIndicator } from "./components/JobStatusIndicator";
-import { MaskOverlayControls } from "./components/MaskOverlayControls";
 import { PromptToolbar } from "./components/PromptToolbar";
 import { ResultsPanel } from "./components/ResultsPanel";
 import { SegmentationCanvas } from "./components/SegmentationCanvas";
@@ -68,7 +67,6 @@ export default function App() {
   const [job, setJob] = useState<JobStatusResponse | null>(null);
   const [result, setResult] = useState<SegmentationResult | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
-  const [maskVisible, setMaskVisible] = useState(true);
   const [overlayOpacity, setOverlayOpacity] = useState(0.65);
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -127,7 +125,6 @@ export default function App() {
       setResult(null);
       setSelectedCandidateId(null);
       setTextPrompt("");
-      setMaskVisible(true);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Upload failed.");
     } finally {
@@ -219,14 +216,6 @@ export default function App() {
             value={textPrompt}
             onChange={setTextPrompt}
           />
-          <MaskOverlayControls
-            disabled={statusBusy}
-            hasMask={visibleMasks.length > 0}
-            maskVisible={maskVisible}
-            overlayOpacity={overlayOpacity}
-            onMaskVisibleChange={setMaskVisible}
-            onOverlayOpacityChange={setOverlayOpacity}
-          />
 
           <section className="panel-block actions-block">
             <div className="section-heading">
@@ -288,7 +277,6 @@ export default function App() {
             boxes={boxes}
             masks={visibleMasks}
             selectedCandidateId={selectedCandidateId}
-            maskVisible={maskVisible}
             overlayOpacity={overlayOpacity}
             disabled={!session || statusBusy}
             onSelectMask={setSelectedCandidateId}
@@ -307,7 +295,9 @@ export default function App() {
         <ResultsPanel
           result={result}
           selectedCandidateId={selectedCandidateId}
+          overlayOpacity={overlayOpacity}
           onSelectCandidate={setSelectedCandidateId}
+          onOverlayOpacityChange={setOverlayOpacity}
           onShowAllMasks={() => setSelectedCandidateId(null)}
         />
       </main>

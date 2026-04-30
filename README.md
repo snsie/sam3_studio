@@ -17,17 +17,17 @@ SAM3 Studio is a local FastAPI + React research/demo app for interactive explora
 
 ## SAM3 Integration Notes
 
-The backend uses the installed `sam3` package directly and intentionally keeps the two supported inference paths separate:
+The backend uses the installed `sam3` package directly and chooses the best supported SAM3 inference path for the currently active prompts:
 
 - Interactive point/box segmentation uses `build_sam3_image_model(..., enable_inst_interactivity=True)` plus `model.predict_inst(...)`.
 - Text prompting uses `Sam3Processor.set_text_prompt(...)` and optional `add_geometric_prompt(...)` box refinement.
 
-This means:
+In product terms, this means:
 
-- Positive/negative points and click-to-segment are supported through the interactive predictor.
-- Text prompting is exposed as experimental grounding.
-- Point + text combinations are blocked because the installed SAM3 API does not expose them through the same predictor surface.
-- Text + box refinement is supported through the grounding path.
+- Any active prompts are applied together whenever the installed SAM3 APIs support that combination.
+- Text-only prompting is exposed as experimental grounding.
+- Point + text requests keep the interactive masks and use the text prompt as an additional grounding prior.
+- Text + box requests are supported automatically without exposing the lower-level SAM3 path details in the UI.
 
 ## Prerequisites
 

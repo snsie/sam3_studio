@@ -620,6 +620,10 @@ button {
   margin: 12px 0;
 }
 
+.results-overlay-controls {
+  margin-bottom: 12px;
+}
+
 .warnings-card {
   margin-bottom: 12px;
   padding: 14px;

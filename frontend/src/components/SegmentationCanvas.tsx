@@ -12,7 +12,6 @@ interface SegmentationCanvasProps {
   boxes: PromptBox[];
   masks: MaskCandidate[];
   selectedCandidateId: string | null;
-  maskVisible: boolean;
   overlayOpacity: number;
   disabled: boolean;
   onSelectMask: (candidateId: string) => void;
@@ -65,7 +64,6 @@ export function SegmentationCanvas({
   boxes,
   masks,
   selectedCandidateId,
-  maskVisible,
   overlayOpacity,
   disabled,
   onSelectMask,
@@ -374,23 +372,21 @@ export function SegmentationCanvas({
               alt="Uploaded scene"
               draggable={false}
             />
-            {maskVisible
-              ? masks.map((mask, index) => {
-                  const maskNumber = getMaskDisplayNumber(mask, index);
-                  return (
-                  <img
-                    key={mask.candidate_id}
-                    className={`viewer-mask ${
-                      selectedCandidateId === mask.candidate_id ? "is-selected" : ""
-                    }`}
-                    src={mask.image_data_url}
-                    alt={`Mask ${maskNumber}`}
-                    style={{ opacity: overlayOpacity }}
-                    draggable={false}
-                  />
-                  );
-                })
-              : null}
+            {masks.map((mask, index) => {
+              const maskNumber = getMaskDisplayNumber(mask, index);
+              return (
+                <img
+                  key={mask.candidate_id}
+                  className={`viewer-mask ${
+                    selectedCandidateId === mask.candidate_id ? "is-selected" : ""
+                  }`}
+                  src={mask.image_data_url}
+                  alt={`Mask ${maskNumber}`}
+                  style={{ opacity: overlayOpacity }}
+                  draggable={false}
+                />
+              );
+            })}
             <svg className="viewer-overlay" viewBox={`0 0 ${imageWidth} ${imageHeight}`}>
               {boxes.map((box) => (
                 <rect
@@ -424,36 +420,34 @@ export function SegmentationCanvas({
                 </g>
               ))}
             </svg>
-            {maskVisible
-              ? masks.map((mask, index) => {
-                  const maskNumber = getMaskDisplayNumber(mask, index);
-                  if (!mask.centroid) {
-                    return null;
-                  }
-                  const [centerX, centerY] = mask.centroid;
-                  return (
-                    <button
-                      key={`${mask.candidate_id}-button`}
-                      type="button"
-                      className={`mask-label-button ${
-                        selectedCandidateId === mask.candidate_id ? "is-active" : ""
-                      }`}
-                      style={{
-                        left: centerX,
-                        top: centerY,
-                        transform: "translate(-50%, -50%)",
-                        ...getMaskLabelStyles(mask.color_rgb),
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onSelectMask(mask.candidate_id);
-                      }}
-                    >
-                      {`Mask ${maskNumber}`}
-                    </button>
-                  );
-                })
-              : null}
+            {masks.map((mask, index) => {
+              const maskNumber = getMaskDisplayNumber(mask, index);
+              if (!mask.centroid) {
+                return null;
+              }
+              const [centerX, centerY] = mask.centroid;
+              return (
+                <button
+                  key={`${mask.candidate_id}-button`}
+                  type="button"
+                  className={`mask-label-button ${
+                    selectedCandidateId === mask.candidate_id ? "is-active" : ""
+                  }`}
+                  style={{
+                    left: centerX,
+                    top: centerY,
+                    transform: "translate(-50%, -50%)",
+                    ...getMaskLabelStyles(mask.color_rgb),
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSelectMask(mask.candidate_id);
+                  }}
+                >
+                  {`Mask ${maskNumber}`}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

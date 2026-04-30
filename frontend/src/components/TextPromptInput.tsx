@@ -16,7 +16,7 @@ export function TextPromptInput({
         <h2>Text Prompt</h2>
       </div>
       <label className="field-label" htmlFor="text-prompt">
-        Experimental SAM3 grounding prompt
+        Experimental SAM3 text prompt
       </label>
       <textarea
         id="text-prompt"
@@ -28,9 +28,9 @@ export function TextPromptInput({
         onChange={(event) => onChange(event.target.value)}
       />
       {/* <p className="field-note">
-        Any non-empty text prompt is applied automatically. If you only enter
-        text, SAM3 Studio runs text grounding. If you also add points or a box,
-        the text is used as an additional prior over the interactive masks.
+        Any non-empty text prompt is applied alongside your active points or
+        boxes when supported. SAM3 Studio automatically chooses the best
+        available inference path for the current prompt set.
       </p> */}
     </section>
   );

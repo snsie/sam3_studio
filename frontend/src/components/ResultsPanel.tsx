@@ -4,16 +4,22 @@ import type { SegmentationResult } from "../types";
 interface ResultsPanelProps {
   result: SegmentationResult | null;
   selectedCandidateId: string | null;
+  overlayOpacity: number;
   onSelectCandidate: (candidateId: string) => void;
+  onOverlayOpacityChange: (value: number) => void;
   onShowAllMasks: () => void;
 }
 
 export function ResultsPanel({
   result,
   selectedCandidateId,
+  overlayOpacity,
   onSelectCandidate,
+  onOverlayOpacityChange,
   onShowAllMasks,
 }: ResultsPanelProps) {
+  const hasMask = Boolean(result && result.candidates.length > 0);
+
   return (
     <aside className="results-panel">
       <div className="results-header">
@@ -31,8 +37,24 @@ export function ResultsPanel({
       ) : (
         <>
           <div className="results-meta">
-            <span className="results-source">Source: {result.source}</span>
             <span className="results-count">{result.candidates.length} candidates</span>
+          </div>
+          <div className="results-overlay-controls">
+            <label className="field-label" htmlFor="results-opacity-range">
+              Overlay opacity
+            </label>
+            <input
+              id="results-opacity-range"
+              className="range-input"
+              type="range"
+              min={0.1}
+              max={1}
+              step={0.05}
+              value={overlayOpacity}
+              disabled={!hasMask}
+              onChange={(event) => onOverlayOpacityChange(Number(event.target.value))}
+            />
+            <div className="range-readout">{Math.round(overlayOpacity * 100)}%</div>
           </div>
           <button
             type="button"
