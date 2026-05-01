@@ -43,6 +43,8 @@ class Settings(BaseSettings):
         alias="FRONTEND_ORIGINS",
     )
     data_dir: Path = ROOT_DIR / "data"
+    challenge_datasets_dir: Path = data_dir / "datasets"
+    leaderboard_db_path: Path = data_dir / "leaderboard.sqlite3"
     uploads_dir: Path = data_dir / "uploads"
     max_upload_size_mb: int = 32
 
@@ -75,5 +77,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.challenge_datasets_dir.mkdir(parents=True, exist_ok=True)
     settings.uploads_dir.mkdir(parents=True, exist_ok=True)
+    settings.leaderboard_db_path.parent.mkdir(parents=True, exist_ok=True)
     return settings

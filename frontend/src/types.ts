@@ -14,6 +14,10 @@ export type InteractionMode =
   | "box"
   | "text";
 
+export type ChallengeId = "single-class" | "multi-class";
+
+export type BrushMode = "off" | "draw" | "erase";
+
 export type PointLabel = "positive" | "negative";
 
 export type PromptPointSource = "click" | "positive_point" | "negative_point";
@@ -74,6 +78,7 @@ export interface UploadResponse {
   width: number;
   height: number;
   image_url: string;
+  ground_truth_overlay_data_url?: string | null;
   created_at: string;
 }
 
@@ -96,4 +101,102 @@ export interface JobStatusResponse {
   updated_at: string;
   result: SegmentationResult | null;
   error: string | null;
+}
+
+export interface ChallengeSummary {
+  challenge_id: ChallengeId;
+  title: string;
+  description: string;
+  image_count: number;
+  example_count: number;
+}
+
+export interface ChallengeImageItem {
+  image_id: string;
+  name: string;
+  index: number;
+  mask_count: number;
+}
+
+export interface ChallengeImageListResponse {
+  challenge: ChallengeSummary;
+  images: ChallengeImageItem[];
+}
+
+export interface ChallengeExampleMask {
+  mask_id: string;
+  label: string;
+  color_rgb: number[];
+  image_url: string;
+}
+
+export interface ChallengeExample {
+  image_id: string;
+  title: string;
+  image_url: string;
+  overlay_data_url: string;
+  masks: ChallengeExampleMask[];
+}
+
+export interface ChallengeExamplesResponse {
+  challenge: ChallengeSummary;
+  examples: ChallengeExample[];
+}
+
+export interface SubmittedMaskLayerPayload {
+  mask_id: string;
+  label?: string | null;
+  image_data_url: string;
+}
+
+export interface SubmittedImageMaskPayload {
+  image_id: string;
+  masks: SubmittedMaskLayerPayload[];
+  width?: number;
+  height?: number;
+}
+
+export interface ChallengeScoreRequestPayload {
+  user_name: string;
+  submissions: SubmittedImageMaskPayload[];
+}
+
+export interface ChallengeScoreSummary {
+  challenge_id: ChallengeId;
+  user_name: string;
+  dataset_size: number;
+  images_labeled: number;
+  percent_completed: number;
+  mean_iou: number;
+  mean_dice: number;
+  pixel_accuracy: number;
+  labeled_mean_iou: number;
+  labeled_mean_dice: number;
+  labeled_pixel_accuracy: number;
+  overall_score: number;
+  submitted_at: string;
+  rank: number | null;
+  warnings: string[];
+}
+
+export interface LeaderboardResponse {
+  challenge_id?: ChallengeId | null;
+  entries: ChallengeScoreSummary[];
+}
+
+export interface EditableMaskLayer {
+  mask_id: string;
+  label: string;
+  color_rgb: [number, number, number];
+  data: Uint8ClampedArray;
+}
+
+export interface ChallengeImageMaskState {
+  image_id: string;
+  width: number;
+  height: number;
+  layers: EditableMaskLayer[];
+  active_mask_id: string | null;
+  stored: boolean;
+  stored_at: string | null;
 }

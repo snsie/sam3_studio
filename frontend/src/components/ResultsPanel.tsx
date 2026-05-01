@@ -4,18 +4,25 @@ import type { MaskCandidate, SegmentationResult } from "../types";
 interface ResultsPanelProps {
   result: SegmentationResult | null;
   visibleCandidates: MaskCandidate[];
+  listCandidates?: MaskCandidate[];
   selectedCandidateId: string | null;
   confidenceThreshold: number;
-  overlayOpacity: number;
+  overlayOpacity?: number;
   onSelectCandidate: (candidateId: string) => void;
-  onConfidenceThresholdChange: (value: number) => void;
-  onOverlayOpacityChange: (value: number) => void;
+  onConfidenceThresholdChange?: (value: number) => void;
+  onOverlayOpacityChange?: (value: number) => void;
   onShowAllMasks: () => void;
+  allMasksButtonLabel?: string;
+  showConfidenceThresholdControl?: boolean;
+  showOverlayOpacityControl?: boolean;
+  visibleCandidatesLabel?: string;
+  emptyThresholdMessage?: string;
 }
 
 export function ResultsPanel({
   result,
   visibleCandidates,
+  listCandidates,
   selectedCandidateId,
   confidenceThreshold,
   overlayOpacity,
@@ -23,16 +30,26 @@ export function ResultsPanel({
   onConfidenceThresholdChange,
   onOverlayOpacityChange,
   onShowAllMasks,
+  allMasksButtonLabel = "Show All Masks",
+  showConfidenceThresholdControl = true,
+  showOverlayOpacityControl = true,
+  visibleCandidatesLabel = "above threshold",
+  emptyThresholdMessage = "No masks are above the current confidence threshold.",
 }: ResultsPanelProps) {
   const totalCandidates = result?.candidates.length ?? 0;
   const hasMask = visibleCandidates.length > 0;
+  const displayedCandidates = listCandidates ?? result?.candidates ?? [];
 
   const handleCandidateSelect = (candidate: MaskCandidate) => {
     const isAboveThreshold =
       typeof candidate.score === "number" && candidate.score > confidenceThreshold;
 
     if (!isAboveThreshold) {
-      window.alert("Lower the confidence threshold to enable viewing that mask.");
+      window.alert(
+        showConfidenceThresholdControl
+          ? "Lower the confidence threshold to enable viewing that mask."
+          : "This mask is below the required confidence threshold.",
+      );
       return;
     }
 
@@ -57,50 +74,56 @@ export function ResultsPanel({
         <>
           <div className="results-meta">
             <span className="results-count">{totalCandidates} candidates</span>
-            <span className="results-count">{visibleCandidates.length} above threshold</span>
+            <span className="results-count">{visibleCandidates.length} {visibleCandidatesLabel}</span>
           </div>
-          <div className="results-overlay-controls">
-            <div className="results-slider-group">
-              <label className="field-label" htmlFor="results-confidence-range">
-                Confidence threshold
-              </label>
-              <input
-                id="results-confidence-range"
-                className="range-input"
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={confidenceThreshold}
-                disabled={totalCandidates === 0}
-                onChange={(event) => onConfidenceThresholdChange(Number(event.target.value))}
-              />
-              <div className="range-readout">{Math.round(confidenceThreshold * 100)}%</div>
+          {showConfidenceThresholdControl || showOverlayOpacityControl ? (
+            <div className="results-overlay-controls">
+              {showConfidenceThresholdControl ? (
+                <div className="results-slider-group">
+                  <label className="field-label" htmlFor="results-confidence-range">
+                    Confidence threshold
+                  </label>
+                  <input
+                    id="results-confidence-range"
+                    className="range-input"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={confidenceThreshold}
+                    disabled={totalCandidates === 0}
+                    onChange={(event) => onConfidenceThresholdChange?.(Number(event.target.value))}
+                  />
+                  <div className="range-readout">{Math.round(confidenceThreshold * 100)}%</div>
+                </div>
+              ) : null}
+              {showOverlayOpacityControl ? (
+                <div className="results-slider-group">
+                  <label className="field-label" htmlFor="results-opacity-range">
+                    Overlay opacity
+                  </label>
+                  <input
+                    id="results-opacity-range"
+                    className="range-input"
+                    type="range"
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    value={overlayOpacity ?? 1}
+                    disabled={!hasMask}
+                    onChange={(event) => onOverlayOpacityChange?.(Number(event.target.value))}
+                  />
+                  <div className="range-readout">{Math.round((overlayOpacity ?? 1) * 100)}%</div>
+                </div>
+              ) : null}
             </div>
-            <div className="results-slider-group">
-              <label className="field-label" htmlFor="results-opacity-range">
-                Overlay opacity
-              </label>
-              <input
-                id="results-opacity-range"
-                className="range-input"
-                type="range"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={overlayOpacity}
-                disabled={!hasMask}
-                onChange={(event) => onOverlayOpacityChange(Number(event.target.value))}
-              />
-              <div className="range-readout">{Math.round(overlayOpacity * 100)}%</div>
-            </div>
-          </div>
+          ) : null}
           <button
             type="button"
             className={`show-all-button ${selectedCandidateId === null ? "is-active" : ""}`}
             onClick={onShowAllMasks}
           >
-            Show All Masks
+            {allMasksButtonLabel}
           </button>
           {result.warnings.length > 0 ? (
             <div className="warnings-card">
@@ -111,11 +134,11 @@ export function ResultsPanel({
           ) : null}
           {!hasMask && totalCandidates > 0 ? (
             <p className="field-note results-filter-note">
-              No masks are above the current confidence threshold.
+              {emptyThresholdMessage}
             </p>
           ) : null}
           <div className="mask-list">
-            {result.candidates.map((candidate, index) => {
+            {displayedCandidates.map((candidate, index) => {
               const maskNumber = getMaskDisplayNumber(candidate, index);
               const score =
                 typeof candidate.score === "number"

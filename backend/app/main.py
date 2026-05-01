@@ -10,18 +10,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes_jobs import router as jobs_router
+from app.api.routes_challenges import router as challenges_router
+from app.api.routes_leaderboard import router as leaderboard_router
 from app.api.routes_samples import router as samples_router
 from app.api.routes_segment import router as segment_router
 from app.api.routes_sessions import router as sessions_router
 from app.api.routes_upload import router as upload_router
 from app.core.config import get_settings
+from app.services.challenge_service import ChallengeService
 from app.services.job_queue import InferenceQueue, ModelWorker
+from app.services.leaderboard_service import LeaderboardService
 from app.services.sam3_runtime import (
     SAM3ModelRuntime,
     is_gpu_capacity_error,
     release_cuda_cache,
 )
 from app.services.sam3_service import SAM3Service
+from app.services.scoring_service import ScoringService
 
 logger = logging.getLogger(__name__)
 FRONTEND_DIST_DIR = Path(__file__).resolve().parents[2] / "frontend" / "dist"
@@ -73,6 +78,9 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         sam3_service = SAM3Service(settings)
+        challenge_service = ChallengeService(settings)
+        leaderboard_service = LeaderboardService(settings.leaderboard_db_path)
+        scoring_service = ScoringService(challenge_service)
         workers = await asyncio.to_thread(build_model_workers, settings, sam3_service)
         job_queue = InferenceQueue(
             workers=workers,
@@ -82,6 +90,9 @@ def create_app() -> FastAPI:
 
         app.state.settings = settings
         app.state.sam3_service = sam3_service
+        app.state.challenge_service = challenge_service
+        app.state.scoring_service = scoring_service
+        app.state.leaderboard_service = leaderboard_service
         app.state.job_queue = job_queue
         try:
             yield
@@ -111,10 +122,14 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router, prefix=settings.api_prefix)
     app.include_router(samples_router, prefix=settings.api_prefix)
     app.include_router(sessions_router, prefix=settings.api_prefix)
+    app.include_router(challenges_router, prefix=settings.api_prefix)
+    app.include_router(leaderboard_router, prefix=settings.api_prefix)
 
     if FRONTEND_DIST_DIR.is_dir():
         logger.info("Serving frontend from %s", FRONTEND_DIST_DIR)
-        app.mount("/", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend")
+        app.mount(
+            "/", StaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend"
+        )
 
     return app
 

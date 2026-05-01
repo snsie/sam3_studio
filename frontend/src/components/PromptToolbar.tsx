@@ -22,17 +22,23 @@ const MODE_OPTIONS: Array<{
 interface PromptToolbarProps {
   disabled: boolean;
   mode: InteractionMode;
+  availableModes?: InteractionMode[];
   onModeChange: (mode: InteractionMode) => void;
 }
 
 export function PromptToolbar({
   disabled,
   mode,
+  availableModes,
   onModeChange,
 }: PromptToolbarProps) {
+  const visibleOptions = availableModes
+    ? MODE_OPTIONS.filter((option) => availableModes.includes(option.mode))
+    : MODE_OPTIONS;
+
   return (
     <div className="prompt-toolbar" role="toolbar" aria-label="Interaction modes">
-      {MODE_OPTIONS.map((option) => (
+      {visibleOptions.map((option) => (
         <button
           key={option.mode}
           type="button"

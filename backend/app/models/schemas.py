@@ -17,6 +17,11 @@ class JobStatus(StrEnum):
     FAILED = "failed"
 
 
+class ChallengeType(StrEnum):
+    SINGLE_CLASS = "single-class"
+    MULTI_CLASS = "multi-class"
+
+
 class PointLabel(StrEnum):
     POSITIVE = "positive"
     NEGATIVE = "negative"
@@ -69,7 +74,6 @@ class SegmentationRequest(BaseModel):
         return self
 
 
-
 class MaskCandidate(BaseModel):
     candidate_id: str
     score: float | None = None
@@ -100,6 +104,7 @@ class UploadResponse(BaseModel):
     width: int
     height: int
     image_url: str
+    ground_truth_overlay_data_url: str | None = None
     created_at: datetime
 
 
@@ -135,3 +140,106 @@ class JobStatusResponse(BaseModel):
     updated_at: datetime
     result: SegmentationResult | None = None
     error: str | None = None
+
+
+class ChallengeSummary(BaseModel):
+    challenge_id: ChallengeType
+    title: str
+    description: str
+    image_count: int
+    example_count: int
+
+
+class ChallengeImageItem(BaseModel):
+    image_id: str
+    name: str
+    index: int
+    mask_count: int
+
+
+class ChallengeImageListResponse(BaseModel):
+    challenge: ChallengeSummary
+    images: list[ChallengeImageItem]
+
+
+class ChallengeExampleMask(BaseModel):
+    mask_id: str
+    label: str
+    color_rgb: list[int]
+    image_url: str
+
+
+class ChallengeExample(BaseModel):
+    image_id: str
+    title: str
+    image_url: str
+    overlay_data_url: str
+    masks: list[ChallengeExampleMask] = Field(default_factory=list)
+
+
+class ChallengeExamplesResponse(BaseModel):
+    challenge: ChallengeSummary
+    examples: list[ChallengeExample]
+
+
+class SubmittedMaskLayer(BaseModel):
+    mask_id: str
+    label: str | None = None
+    image_data_url: str
+
+    @model_validator(mode="after")
+    def validate_image_data_url(self) -> "SubmittedMaskLayer":
+        if not self.image_data_url.startswith("data:image"):
+            raise ValueError("Submitted masks must be base64-encoded image data URLs.")
+        return self
+
+
+class SubmittedImageMask(BaseModel):
+    image_id: str
+    masks: list[SubmittedMaskLayer]
+    width: int | None = Field(default=None, ge=1)
+    height: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_masks(self) -> "SubmittedImageMask":
+        if not self.masks:
+            raise ValueError(
+                "Each submitted image must include at least one mask layer."
+            )
+        return self
+
+
+class ChallengeScoreRequest(BaseModel):
+    user_name: str
+    submissions: list[SubmittedImageMask]
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "ChallengeScoreRequest":
+        if not self.user_name.strip():
+            raise ValueError("User name must not be blank.")
+        if not self.submissions:
+            raise ValueError("At least one stored mask submission is required.")
+        return self
+
+
+class ChallengeScoreSummary(BaseModel):
+    challenge_id: ChallengeType
+    user_name: str
+    dataset_size: int
+    images_labeled: int
+    percent_completed: float = Field(ge=0, le=1)
+    mean_iou: float = Field(ge=0, le=1)
+    mean_dice: float = Field(ge=0, le=1)
+    pixel_accuracy: float = Field(ge=0, le=1)
+    labeled_mean_iou: float = Field(ge=0, le=1)
+    labeled_mean_dice: float = Field(ge=0, le=1)
+    labeled_pixel_accuracy: float = Field(ge=0, le=1)
+    overall_score: float = Field(ge=0)
+    submitted_at: datetime
+    rank: int | None = Field(default=None, ge=1)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LeaderboardResponse(BaseModel):
+    challenge_id: ChallengeType | None = None
+    entries: list[ChallengeScoreSummary]

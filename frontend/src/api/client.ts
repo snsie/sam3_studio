@@ -1,5 +1,12 @@
 import type {
+  ChallengeExamplesResponse,
+  ChallengeId,
+  ChallengeImageListResponse,
+  ChallengeScoreRequestPayload,
+  ChallengeScoreSummary,
+  ChallengeSummary,
   JobStatusResponse,
+  LeaderboardResponse,
   SegmentationRequest,
   SessionResetResponse,
   UploadResponse,
@@ -116,6 +123,64 @@ export async function resetSessionCache(
     method: "POST",
   });
   return parseResponse<SessionResetResponse>(response);
+}
+
+export async function listChallenges(): Promise<ChallengeSummary[]> {
+  const response = await fetch(`${API_BASE}/challenges`);
+  return parseResponse<ChallengeSummary[]>(response);
+}
+
+export async function listChallengeImages(
+  challengeId: ChallengeId,
+): Promise<ChallengeImageListResponse> {
+  const response = await fetch(`${API_BASE}/challenges/${challengeId}/images`);
+  return parseResponse<ChallengeImageListResponse>(response);
+}
+
+export async function loadChallengeImage(
+  challengeId: ChallengeId,
+  imageId: string,
+): Promise<UploadResponse> {
+  const response = await fetch(
+    `${API_BASE}/challenges/${challengeId}/images/${encodeURIComponent(imageId)}/load`,
+    {
+      method: "POST",
+    },
+  );
+  return parseResponse<UploadResponse>(response);
+}
+
+export async function listChallengeExamples(
+  challengeId: ChallengeId,
+): Promise<ChallengeExamplesResponse> {
+  const response = await fetch(`${API_BASE}/challenges/${challengeId}/examples`);
+  return parseResponse<ChallengeExamplesResponse>(response);
+}
+
+export async function scoreChallengeDataset(
+  challengeId: ChallengeId,
+  payload: ChallengeScoreRequestPayload,
+): Promise<ChallengeScoreSummary> {
+  const response = await fetchWithTimeout(
+    `${API_BASE}/challenges/${challengeId}/score`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    SEGMENTATION_TIMEOUT_MS,
+  );
+  return parseResponse<ChallengeScoreSummary>(response);
+}
+
+export async function listLeaderboardEntries(
+  challengeId?: ChallengeId,
+): Promise<LeaderboardResponse> {
+  const path = challengeId ? `${API_BASE}/leaderboard/${challengeId}` : `${API_BASE}/leaderboard`;
+  const response = await fetch(path);
+  return parseResponse<LeaderboardResponse>(response);
 }
 
 export { ApiError };

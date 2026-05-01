@@ -4,15 +4,21 @@ interface ImageUploaderProps {
   disabled: boolean;
   currentFilename: string | null;
   onUpload: (file: File) => Promise<void>;
+  variant?: "panel" | "header";
 }
 
 export function ImageUploader({
   disabled,
   currentFilename,
   onUpload,
+  variant = "panel",
 }: ImageUploaderProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const shellClassName =
+    variant === "header"
+      ? "image-uploader-shell image-uploader-shell-header"
+      : "panel-block image-uploader-shell";
 
   const handleFiles = async (files: FileList | null) => {
     const file = files?.[0];
@@ -23,10 +29,10 @@ export function ImageUploader({
   };
 
   return (
-    <section className="panel-block">
+    <section className={shellClassName}>
       <div className="section-heading">
-        <span className="section-kicker">Input</span>
-        <h2>Image Upload</h2>
+        {/* <span className="section-kicker">Input</span> */}
+        {/* <h2>Image Upload</h2> */}
       </div>
       <button
         type="button"

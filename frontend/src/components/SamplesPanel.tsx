@@ -7,6 +7,15 @@ interface SamplesPanelProps {
   onSelectSample: (filename: string) => Promise<void>;
 }
 
+function formatSampleLabel(filename: string): string {
+  const nameWithoutExtension = filename.replace(/\.[^./\\]+$/, "");
+  if (nameWithoutExtension.length === 0) {
+    return filename;
+  }
+
+  return `${nameWithoutExtension.charAt(0).toUpperCase()}${nameWithoutExtension.slice(1)}`;
+}
+
 export function SamplesPanel({
   samples,
   currentFilename,
@@ -40,7 +49,7 @@ export function SamplesPanel({
                   await onSelectSample(sample);
                 }}
               >
-                <span className="sample-list-title">{sample}</span>
+                <span className="sample-list-title">{formatSampleLabel(sample)}</span>
                 <span className="sample-list-subtitle">
                   {isActive ? "Loaded on canvas" : "Load sample image"}
                 </span>

@@ -13,9 +13,12 @@ from PIL import Image
 
 from app.core.config import Settings
 from app.models.schemas import (
+    ChallengeType,
     JobStatus,
     MaskCandidate,
     PointLabel,
+    PromptBox,
+    PromptPoint,
     SegmentationRequest,
     SegmentationResult,
 )
@@ -166,7 +169,7 @@ class SAM3ModelRuntime:
     ) -> SegmentationResult:
         masks, scores, warnings = self._predict_interactive_masks(payload, base_state)
 
-        candidates = self._build_candidates(masks=masks, scores=scores)
+        candidates = self._build_candidates(session=session, masks=masks, scores=scores)
         if not candidates:
             warnings.append("SAM3 returned no masks for the current prompts.")
 
@@ -188,6 +191,10 @@ class SAM3ModelRuntime:
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         if self._model is None:
             raise RuntimeError("SAM3 model is not initialized.")
+
+        multi_object_masks = self._predict_multi_object_interactive_masks(payload, base_state)
+        if multi_object_masks is not None:
+            return multi_object_masks
 
         point_coords = None
         point_labels = None
@@ -219,6 +226,110 @@ class SAM3ModelRuntime:
 
         return masks, scores, warnings
 
+    def _predict_multi_object_interactive_masks(
+        self,
+        payload: SegmentationRequest,
+        base_state: dict[str, Any],
+    ) -> tuple[np.ndarray, np.ndarray, list[str]] | None:
+        positive_points = [point for point in payload.points if point.label == PointLabel.POSITIVE]
+        negative_points = [point for point in payload.points if point.label == PointLabel.NEGATIVE]
+        positive_boxes = [box for box in payload.boxes if box.label == PointLabel.POSITIVE]
+
+        split_points = len(positive_points) > 1 and not negative_points and not payload.boxes
+        split_boxes = len(positive_boxes) > 1 and not positive_points
+
+        if not split_points and not split_boxes:
+            return None
+
+        seed_predictions: list[tuple[np.ndarray, float]] = []
+        warnings: list[str] = []
+
+        if split_points:
+            warnings.append(
+                "Multiple positive points were treated as separate object seeds to recover disconnected objects."
+            )
+            for point in positive_points:
+                prediction = self._predict_single_interactive_seed(
+                    base_state,
+                    positive_point=point,
+                )
+                if prediction is not None:
+                    seed_predictions.append(prediction)
+
+        if split_boxes:
+            warnings.append(
+                "Multiple boxes were run as separate object seeds and merged into a union candidate."
+            )
+            for box in positive_boxes:
+                prediction = self._predict_single_interactive_seed(
+                    base_state,
+                    positive_box=box,
+                    negative_points=negative_points,
+                )
+                if prediction is not None:
+                    seed_predictions.append(prediction)
+
+        if not seed_predictions:
+            return np.empty((0, 0, 0), dtype=np.float32), np.array([], dtype=np.float32), warnings
+
+        masks = np.stack([mask for mask, _ in seed_predictions], axis=0).astype(np.float32)
+        scores = np.array([score for _, score in seed_predictions], dtype=np.float32)
+
+        if len(seed_predictions) > 1:
+            union_mask = np.any(masks > 0.5, axis=0).astype(np.float32)
+            union_score = np.array([float(scores.max(initial=0.0))], dtype=np.float32)
+            masks = np.concatenate([union_mask[np.newaxis, ...], masks], axis=0)
+            scores = np.concatenate([union_score, scores], axis=0)
+
+        return masks, scores, warnings
+
+    def _predict_single_interactive_seed(
+        self,
+        base_state: dict[str, Any],
+        *,
+        positive_point: PromptPoint | None = None,
+        positive_box: PromptBox | None = None,
+        negative_points: list[PromptPoint] | None = None,
+    ) -> tuple[np.ndarray, float] | None:
+        if self._model is None:
+            raise RuntimeError("SAM3 model is not initialized.")
+
+        points: list[PromptPoint] = []
+        if positive_point is not None:
+            points.append(positive_point)
+        if negative_points:
+            points.extend(negative_points)
+
+        point_coords = None
+        point_labels = None
+        if points:
+            point_coords = np.array([[point.x, point.y] for point in points], dtype=np.float32)
+            point_labels = np.array(
+                [1 if point.label == PointLabel.POSITIVE else 0 for point in points],
+                dtype=np.int32,
+            )
+
+        box = None
+        if positive_box is not None:
+            box = np.array([positive_box.x0, positive_box.y0, positive_box.x1, positive_box.y1], dtype=np.float32)
+
+        masks, scores, _ = self._model.predict_inst(
+            self._clone_state(base_state),
+            point_coords=point_coords,
+            point_labels=point_labels,
+            box=box,
+            multimask_output=False,
+        )
+
+        mask_array = self._normalize_masks(masks)
+        if mask_array.size == 0:
+            return None
+
+        score_array = np.atleast_1d(self._to_numpy(scores).astype(np.float32))
+        best_index = int(np.argmax(score_array)) if score_array.size > 0 else 0
+        best_score = float(score_array[best_index]) if best_index < len(score_array) else 0.0
+        return mask_array[best_index].astype(np.float32), best_score
+
     def _run_text_guided_interactive_segmentation(
         self,
         session: SessionAsset,
@@ -243,7 +354,11 @@ class SAM3ModelRuntime:
         )
         warnings.extend(text_guidance_warnings)
 
-        candidates = self._build_candidates(masks=filtered_masks, scores=filtered_scores)
+        candidates = self._build_candidates(
+            session=session,
+            masks=filtered_masks,
+            scores=filtered_scores,
+        )
         if not candidates:
             warnings.append("SAM3 returned no masks for the current combined prompts.")
 
@@ -270,7 +385,12 @@ class SAM3ModelRuntime:
             base_state,
         )
 
-        candidates = self._build_candidates(masks=masks, scores=scores, boxes=boxes)
+        candidates = self._build_candidates(
+            session=session,
+            masks=masks,
+            scores=scores,
+            boxes=boxes,
+        )
         if not candidates:
             warnings.append("SAM3 returned no text-grounded masks for the current prompt.")
 
@@ -385,6 +505,7 @@ class SAM3ModelRuntime:
 
     def _build_candidates(
         self,
+        session: SessionAsset,
         masks: Any,
         scores: Any,
         boxes: Any | None = None,
@@ -415,7 +536,11 @@ class SAM3ModelRuntime:
         candidates: list[MaskCandidate] = []
         for index, source_index in enumerate(kept_indices):
             mask_bool = kept_masks[index]
-            color = MASK_PALETTE[index % len(MASK_PALETTE)]
+            color = (
+                MASK_PALETTE[0]
+                if session.challenge_id == ChallengeType.SINGLE_CLASS
+                else MASK_PALETTE[index % len(MASK_PALETTE)]
+            )
             image_data_url = self._mask_to_data_url(mask_bool, color)
             score = float(raw_score_array[source_index]) if source_index < len(raw_score_array) else None
             centroid = self._compute_mask_centroid(mask_bool)

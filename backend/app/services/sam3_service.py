@@ -10,7 +10,7 @@ from uuid import uuid4
 from PIL import Image, UnidentifiedImageError
 
 from app.core.config import Settings
-from app.models.schemas import SessionInfoResponse, UploadResponse
+from app.models.schemas import ChallengeType, SessionInfoResponse, UploadResponse
 
 
 ALLOWED_CONTENT_TYPES = {
@@ -33,6 +33,7 @@ class SessionAsset:
     image_path: Path
     width: int
     height: int
+    challenge_id: ChallengeType | None = None
     created_at: datetime = field(default_factory=utcnow)
     cache_version: int = 0
     cache_ready: bool = False
@@ -44,7 +45,13 @@ class SAM3Service:
         self._sessions: dict[str, SessionAsset] = {}
         self._sessions_lock = Lock()
 
-    def create_session(self, filename: str, content_type: str | None, content: bytes) -> UploadResponse:
+    def create_session(
+        self,
+        filename: str,
+        content_type: str | None,
+        content: bytes,
+        challenge_id: ChallengeType | None = None,
+    ) -> UploadResponse:
         if len(content) > self._settings.max_upload_size_mb * 1024 * 1024:
             raise ValueError(
                 f"Uploaded image exceeds the {self._settings.max_upload_size_mb} MB limit."
@@ -70,6 +77,7 @@ class SAM3Service:
             image_path=image_path,
             width=image.width,
             height=image.height,
+            challenge_id=challenge_id,
         )
         with self._sessions_lock:
             self._sessions[session_id] = asset

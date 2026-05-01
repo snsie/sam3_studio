@@ -35,15 +35,21 @@ interface ImagePoint {
   y: number;
 }
 
-interface DragState {
-  kind: "pan" | "box";
+interface BoxDragState {
+  kind: "box";
+  startImageX: number;
+  startImageY: number;
+}
+
+interface PanDragState {
+  kind: "pan";
   startClientX: number;
   startClientY: number;
-  originX: number;
-  originY: number;
-  startImageX?: number;
-  startImageY?: number;
+  startViewX: number;
+  startViewY: number;
 }
+
+type DragState = BoxDragState | PanDragState;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -189,16 +195,18 @@ export function SegmentationCanvas({
       return;
     }
 
-    const shouldPan = spacePressed || event.altKey || event.button === 1;
-    if (shouldPan) {
+    const isPanGesture = spacePressed || event.altKey || event.button === 1;
+    if (isPanGesture) {
+      event.preventDefault();
       container.setPointerCapture(event.pointerId);
       setDragState({
         kind: "pan",
         startClientX: event.clientX,
         startClientY: event.clientY,
-        originX: view.x,
-        originY: view.y,
+        startViewX: view.x,
+        startViewY: view.y,
       });
+      pendingClickRef.current = null;
       return;
     }
 
@@ -210,10 +218,6 @@ export function SegmentationCanvas({
       container.setPointerCapture(event.pointerId);
       setDragState({
         kind: "box",
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        originX: view.x,
-        originY: view.y,
         startImageX: point.x,
         startImageY: point.y,
       });
@@ -239,14 +243,14 @@ export function SegmentationCanvas({
     if (dragState.kind === "pan") {
       setView((current) => ({
         ...current,
-        x: dragState.originX + (event.clientX - dragState.startClientX),
-        y: dragState.originY + (event.clientY - dragState.startClientY),
+        x: dragState.startViewX + event.clientX - dragState.startClientX,
+        y: dragState.startViewY + event.clientY - dragState.startClientY,
       }));
       return;
     }
 
     const point = getImageCoordinates(event.clientX, event.clientY);
-    if (!point || dragState.startImageX === undefined || dragState.startImageY === undefined) {
+    if (!point) {
       return;
     }
 
@@ -271,17 +275,17 @@ export function SegmentationCanvas({
       return;
     }
 
-    if (dragState?.kind === "box") {
-      if (draftBox && draftBox.x1 - draftBox.x0 > 4 && draftBox.y1 - draftBox.y0 > 4) {
-        onAddBox({ ...draftBox, id: crypto.randomUUID() });
-      }
-      setDraftBox(null);
+    if (dragState?.kind === "pan") {
       setDragState(null);
       pendingClickRef.current = null;
       return;
     }
 
-    if (dragState?.kind === "pan") {
+    if (dragState?.kind === "box") {
+      if (draftBox && draftBox.x1 - draftBox.x0 > 4 && draftBox.y1 - draftBox.y0 > 4) {
+        onAddBox({ ...draftBox, id: crypto.randomUUID() });
+      }
+      setDraftBox(null);
       setDragState(null);
       pendingClickRef.current = null;
       return;
@@ -327,9 +331,6 @@ export function SegmentationCanvas({
   };
 
   const cursorClass = useMemo(() => {
-    if (spacePressed) {
-      return "cursor-pan";
-    }
     if (mode === "box") {
       return "cursor-crosshair";
     }
@@ -337,7 +338,7 @@ export function SegmentationCanvas({
       return "cursor-target";
     }
     return "cursor-default";
-  }, [mode, spacePressed]);
+  }, [mode]);
 
   const interceptCanvasPointerEvent = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -346,6 +347,12 @@ export function SegmentationCanvas({
   const handleCanvasContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     pendingClickRef.current = null;
+  };
+
+  const handleCanvasMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button === 1) {
+      event.preventDefault();
+    }
   };
 
   const handlePromptContextMenu = (
@@ -421,6 +428,7 @@ export function SegmentationCanvas({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
+        onMouseDown={handleCanvasMouseDown}
         onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -439,7 +447,9 @@ export function SegmentationCanvas({
           <>
             <div className="viewer-stage-hud viewer-stage-hud-top">
               <span className="viewer-scale-badge">{Math.round(view.scale * 100)}%</span>
-              <span className="viewer-hint-badge">Wheel to zoom. Space/Alt + drag to pan.</span>
+              <span className="viewer-hint-badge">
+                Wheel to zoom. Middle-drag, Space-drag, or Alt-drag to pan. Left-drag draws boxes.
+              </span>
             </div>
             <button
               type="button"
