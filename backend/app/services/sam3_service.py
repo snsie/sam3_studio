@@ -12,7 +12,6 @@ from PIL import Image, UnidentifiedImageError
 from app.core.config import Settings
 from app.models.schemas import ChallengeType, SessionInfoResponse, UploadResponse
 
-
 ALLOWED_CONTENT_TYPES = {
     "image/png",
     "image/jpeg",
@@ -58,7 +57,10 @@ class SAM3Service:
             )
 
         normalized_content_type = (content_type or "").lower()
-        if normalized_content_type and normalized_content_type not in ALLOWED_CONTENT_TYPES:
+        if (
+            normalized_content_type
+            and normalized_content_type not in ALLOWED_CONTENT_TYPES
+        ):
             raise ValueError("Unsupported image type. Use PNG, JPG, JPEG, or WEBP.")
 
         try:

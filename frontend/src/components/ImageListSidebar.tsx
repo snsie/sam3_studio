@@ -4,6 +4,7 @@ interface ImageListSidebarProps {
   images: ChallengeImageItem[];
   activeImageId: string | null;
   completedImageIds: Set<string>;
+  highlightedImageId: string | null;
   isLoading: boolean;
   errorMessage: string | null;
   onSelectImage: (imageId: string) => void;
@@ -13,6 +14,7 @@ export function ImageListSidebar({
   images,
   activeImageId,
   completedImageIds,
+  highlightedImageId,
   isLoading,
   errorMessage,
   onSelectImage,
@@ -30,11 +32,12 @@ export function ImageListSidebar({
           {images.map((image) => {
             const isComplete = completedImageIds.has(image.image_id);
             const isActive = image.image_id === activeImageId;
+            const isHighlighted = image.image_id === highlightedImageId;
             return (
               <button
                 key={image.image_id}
                 type="button"
-                className={`challenge-image-item${isActive ? " is-active" : ""}`}
+                className={`challenge-image-item${isActive ? " is-active" : ""}${isHighlighted ? " is-recently-stored" : ""}`}
                 onClick={() => onSelectImage(image.image_id)}
               >
                 <span className={`challenge-status-dot ${isComplete ? "is-complete" : "is-pending"}`}>

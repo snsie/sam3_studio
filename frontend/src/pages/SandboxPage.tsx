@@ -57,8 +57,8 @@ function shouldUseMultimaskOutput(
   const [point] = points;
   return Boolean(
     point &&
-      point.label === "positive" &&
-      (resolvedMode === "click" || resolvedMode === "positive_point"),
+    point.label === "positive" &&
+    (resolvedMode === "click" || resolvedMode === "positive_point"),
   );
 }
 
@@ -263,13 +263,13 @@ export function SandboxPage({ onHeaderStateChange }: SandboxPageProps) {
       setJob((current) =>
         current
           ? {
-              ...current,
-              status: "failed",
-              progress: 1,
-              message: "Segmentation failed",
-              updated_at: new Date().toISOString(),
-              error: message,
-            }
+            ...current,
+            status: "failed",
+            progress: 1,
+            message: "Segmentation failed",
+            updated_at: new Date().toISOString(),
+            error: message,
+          }
           : null,
       );
       setErrorMessage(message);

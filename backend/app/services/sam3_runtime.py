@@ -24,7 +24,6 @@ from app.models.schemas import (
 )
 from app.services.sam3_service import SAM3Service, SessionAsset
 
-
 ProgressCallback = Callable[[JobStatus, str, float], None]
 
 MASK_PALETTE: tuple[tuple[int, int, int], ...] = (
@@ -90,7 +89,9 @@ class SAM3ModelRuntime:
         self._ensure_model_loaded()
 
         with self._inference_context():
-            progress(JobStatus.LOADING_IMAGE_EMBEDDINGS, "Loading image embeddings", 0.25)
+            progress(
+                JobStatus.LOADING_IMAGE_EMBEDDINGS, "Loading image embeddings", 0.25
+            )
             session = self._sessions.get_session_asset(payload.session_id)
             base_state = self._get_or_build_base_state(session)
 
@@ -104,7 +105,9 @@ class SAM3ModelRuntime:
             elif has_text:
                 result = self._run_text_grounding(session, payload, base_state)
             else:
-                result = self._run_interactive_segmentation(session, payload, base_state)
+                result = self._run_interactive_segmentation(
+                    session, payload, base_state
+                )
 
         progress(JobStatus.PACKAGING_MASKS, "Packaging masks", 0.9)
         return result
@@ -144,7 +147,10 @@ class SAM3ModelRuntime:
 
     def _get_or_build_base_state(self, session: SessionAsset) -> dict[str, Any]:
         cached_state = self._session_states.get(session.session_id)
-        if cached_state is not None and cached_state.cache_version == session.cache_version:
+        if (
+            cached_state is not None
+            and cached_state.cache_version == session.cache_version
+        ):
             return cached_state.base_state
 
         if self._processor is None:
@@ -192,16 +198,23 @@ class SAM3ModelRuntime:
         if self._model is None:
             raise RuntimeError("SAM3 model is not initialized.")
 
-        multi_object_masks = self._predict_multi_object_interactive_masks(payload, base_state)
+        multi_object_masks = self._predict_multi_object_interactive_masks(
+            payload, base_state
+        )
         if multi_object_masks is not None:
             return multi_object_masks
 
         point_coords = None
         point_labels = None
         if payload.points:
-            point_coords = np.array([[point.x, point.y] for point in payload.points], dtype=np.float32)
+            point_coords = np.array(
+                [[point.x, point.y] for point in payload.points], dtype=np.float32
+            )
             point_labels = np.array(
-                [1 if point.label == PointLabel.POSITIVE else 0 for point in payload.points],
+                [
+                    1 if point.label == PointLabel.POSITIVE else 0
+                    for point in payload.points
+                ],
                 dtype=np.int32,
             )
 
@@ -209,12 +222,19 @@ class SAM3ModelRuntime:
         box = None
         warnings: list[str] = []
         if len(payload.boxes) > 1:
-            warnings.append("Interactive SAM3 currently uses the most recent box prompt only.")
+            warnings.append(
+                "Interactive SAM3 currently uses the most recent box prompt only."
+            )
         if selected_box is not None:
-            box = np.array([selected_box.x0, selected_box.y0, selected_box.x1, selected_box.y1], dtype=np.float32)
+            box = np.array(
+                [selected_box.x0, selected_box.y0, selected_box.x1, selected_box.y1],
+                dtype=np.float32,
+            )
 
         if point_coords is None and box is None:
-            raise ValueError("Provide at least one point or a box for interactive segmentation.")
+            raise ValueError(
+                "Provide at least one point or a box for interactive segmentation."
+            )
 
         masks, scores, _ = self._model.predict_inst(
             self._clone_state(base_state),
@@ -231,11 +251,19 @@ class SAM3ModelRuntime:
         payload: SegmentationRequest,
         base_state: dict[str, Any],
     ) -> tuple[np.ndarray, np.ndarray, list[str]] | None:
-        positive_points = [point for point in payload.points if point.label == PointLabel.POSITIVE]
-        negative_points = [point for point in payload.points if point.label == PointLabel.NEGATIVE]
-        positive_boxes = [box for box in payload.boxes if box.label == PointLabel.POSITIVE]
+        positive_points = [
+            point for point in payload.points if point.label == PointLabel.POSITIVE
+        ]
+        negative_points = [
+            point for point in payload.points if point.label == PointLabel.NEGATIVE
+        ]
+        positive_boxes = [
+            box for box in payload.boxes if box.label == PointLabel.POSITIVE
+        ]
 
-        split_points = len(positive_points) > 1 and not negative_points and not payload.boxes
+        split_points = (
+            len(positive_points) > 1 and not negative_points and not payload.boxes
+        )
         split_boxes = len(positive_boxes) > 1 and not positive_points
 
         if not split_points and not split_boxes:
@@ -270,9 +298,15 @@ class SAM3ModelRuntime:
                     seed_predictions.append(prediction)
 
         if not seed_predictions:
-            return np.empty((0, 0, 0), dtype=np.float32), np.array([], dtype=np.float32), warnings
+            return (
+                np.empty((0, 0, 0), dtype=np.float32),
+                np.array([], dtype=np.float32),
+                warnings,
+            )
 
-        masks = np.stack([mask for mask, _ in seed_predictions], axis=0).astype(np.float32)
+        masks = np.stack([mask for mask, _ in seed_predictions], axis=0).astype(
+            np.float32
+        )
         scores = np.array([score for _, score in seed_predictions], dtype=np.float32)
 
         if len(seed_predictions) > 1:
@@ -303,7 +337,9 @@ class SAM3ModelRuntime:
         point_coords = None
         point_labels = None
         if points:
-            point_coords = np.array([[point.x, point.y] for point in points], dtype=np.float32)
+            point_coords = np.array(
+                [[point.x, point.y] for point in points], dtype=np.float32
+            )
             point_labels = np.array(
                 [1 if point.label == PointLabel.POSITIVE else 0 for point in points],
                 dtype=np.int32,
@@ -311,7 +347,10 @@ class SAM3ModelRuntime:
 
         box = None
         if positive_box is not None:
-            box = np.array([positive_box.x0, positive_box.y0, positive_box.x1, positive_box.y1], dtype=np.float32)
+            box = np.array(
+                [positive_box.x0, positive_box.y0, positive_box.x1, positive_box.y1],
+                dtype=np.float32,
+            )
 
         masks, scores, _ = self._model.predict_inst(
             self._clone_state(base_state),
@@ -327,7 +366,9 @@ class SAM3ModelRuntime:
 
         score_array = np.atleast_1d(self._to_numpy(scores).astype(np.float32))
         best_index = int(np.argmax(score_array)) if score_array.size > 0 else 0
-        best_score = float(score_array[best_index]) if best_index < len(score_array) else 0.0
+        best_score = (
+            float(score_array[best_index]) if best_index < len(score_array) else 0.0
+        )
         return mask_array[best_index].astype(np.float32), best_score
 
     def _run_text_guided_interactive_segmentation(
@@ -336,9 +377,11 @@ class SAM3ModelRuntime:
         payload: SegmentationRequest,
         base_state: dict[str, Any],
     ) -> SegmentationResult:
-        interactive_masks, interactive_scores, warnings = self._predict_interactive_masks(
-            payload,
-            base_state,
+        interactive_masks, interactive_scores, warnings = (
+            self._predict_interactive_masks(
+                payload,
+                base_state,
+            )
         )
         text_masks, _, _, text_warnings = self._predict_text_grounding_outputs(
             session,
@@ -347,10 +390,12 @@ class SAM3ModelRuntime:
         )
         warnings.extend(text_warnings)
 
-        filtered_masks, filtered_scores, text_guidance_warnings = self._apply_text_guidance(
-            interactive_masks,
-            interactive_scores,
-            text_masks,
+        filtered_masks, filtered_scores, text_guidance_warnings = (
+            self._apply_text_guidance(
+                interactive_masks,
+                interactive_scores,
+                text_masks,
+            )
         )
         warnings.extend(text_guidance_warnings)
 
@@ -392,7 +437,9 @@ class SAM3ModelRuntime:
             boxes=boxes,
         )
         if not candidates:
-            warnings.append("SAM3 returned no text-grounded masks for the current prompt.")
+            warnings.append(
+                "SAM3 returned no text-grounded masks for the current prompt."
+            )
 
         return SegmentationResult(
             session_id=session.session_id,
@@ -445,7 +492,9 @@ class SAM3ModelRuntime:
         text_masks: Any,
     ) -> tuple[np.ndarray, np.ndarray, list[str]]:
         interactive_mask_array = self._normalize_masks(interactive_masks)
-        interactive_score_array = np.atleast_1d(self._to_numpy(interactive_scores).astype(np.float32))
+        interactive_score_array = np.atleast_1d(
+            self._to_numpy(interactive_scores).astype(np.float32)
+        )
         text_mask_array = self._normalize_masks(text_masks)
         warnings: list[str] = []
 
@@ -474,7 +523,10 @@ class SAM3ModelRuntime:
             )
             return interactive_mask_array, interactive_score_array, warnings
 
-        ranking = overlap_ratios[overlapping_indices] * 1000.0 + interactive_score_array[overlapping_indices]
+        ranking = (
+            overlap_ratios[overlapping_indices] * 1000.0
+            + interactive_score_array[overlapping_indices]
+        )
         sorted_indices = overlapping_indices[np.argsort(-ranking, kind="stable")]
         warnings.append(
             "Text prompt was used as an additional grounding prior over the interactive prompts."
@@ -515,7 +567,11 @@ class SAM3ModelRuntime:
             return []
 
         raw_score_array = np.atleast_1d(self._to_numpy(scores).astype(np.float32))
-        box_array = None if boxes is None else np.atleast_2d(self._to_numpy(boxes).astype(np.float32))
+        box_array = (
+            None
+            if boxes is None
+            else np.atleast_2d(self._to_numpy(boxes).astype(np.float32))
+        )
 
         ranking_scores = np.full(mask_array.shape[0], -np.inf, dtype=np.float32)
         score_count = min(len(raw_score_array), len(ranking_scores))
@@ -528,7 +584,10 @@ class SAM3ModelRuntime:
 
         for candidate_index in sorted_indices:
             candidate_mask = mask_array[candidate_index] > 0.5
-            if any(self._compute_mask_iou(candidate_mask, existing_mask) > 0.8 for existing_mask in kept_masks):
+            if any(
+                self._compute_mask_iou(candidate_mask, existing_mask) > 0.8
+                for existing_mask in kept_masks
+            ):
                 continue
             kept_indices.append(int(candidate_index))
             kept_masks.append(candidate_mask)
@@ -542,7 +601,11 @@ class SAM3ModelRuntime:
                 else MASK_PALETTE[index % len(MASK_PALETTE)]
             )
             image_data_url = self._mask_to_data_url(mask_bool, color)
-            score = float(raw_score_array[source_index]) if source_index < len(raw_score_array) else None
+            score = (
+                float(raw_score_array[source_index])
+                if source_index < len(raw_score_array)
+                else None
+            )
             centroid = self._compute_mask_centroid(mask_bool)
             bounding_box = (
                 box_array[source_index].tolist()

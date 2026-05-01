@@ -637,9 +637,8 @@ export function AnnotationCanvas({
               {groundTruthOverlayUrl ? (
                 <button
                   type="button"
-                  className={`annotation-ground-truth-toggle${
-                    isGroundTruthVisible ? " is-active" : ""
-                  }`}
+                  className={`annotation-ground-truth-toggle${isGroundTruthVisible ? " is-active" : ""
+                    }`}
                   aria-pressed={isGroundTruthVisible}
                   onPointerDown={interceptCanvasPointerEvent}
                   onPointerUp={interceptCanvasPointerEvent}

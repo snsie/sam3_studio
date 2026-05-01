@@ -102,8 +102,8 @@ function shouldUseMultimaskOutput(
   const [point] = points;
   return Boolean(
     point &&
-      point.label === "positive" &&
-      (resolvedMode === "click" || resolvedMode === "positive_point"),
+    point.label === "positive" &&
+    (resolvedMode === "click" || resolvedMode === "positive_point"),
   );
 }
 
@@ -238,12 +238,27 @@ export function ChallengeWorkspace({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [scoreErrorMessage, setScoreErrorMessage] = useState<string | null>(null);
   const [completionMessage, setCompletionMessage] = useState<string | null>(null);
+  const [storeToast, setStoreToast] = useState<{ id: number; message: string } | null>(null);
   const [showExamples, setShowExamples] = useState(false);
   const [displayCandidates, setDisplayCandidates] = useState<MaskCandidate[]>([]);
   const [brushSeedMask, setBrushSeedMask] = useState<Uint8ClampedArray | null>(null);
 
   const currentImage = images[selectedImageIndex] ?? null;
   const deferredResult = useDeferredValue(result);
+
+  useEffect(() => {
+    if (!storeToast) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStoreToast(null);
+    }, 1800);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [storeToast]);
 
   const visibleCandidates = useMemo(() => {
     if (!deferredResult || deferredResult.candidates.length === 0) {
@@ -303,6 +318,23 @@ export function ChallengeWorkspace({
       ),
     [imageStates],
   );
+
+  const highlightedImageId = useMemo(() => {
+    let latestStoredImageId: string | null = null;
+    let latestStoredAt: string | null = null;
+
+    Object.values(imageStates).forEach((state) => {
+      if (!state.stored || !state.stored_at) {
+        return;
+      }
+      if (latestStoredAt === null || state.stored_at > latestStoredAt) {
+        latestStoredAt = state.stored_at;
+        latestStoredImageId = state.image_id;
+      }
+    });
+
+    return latestStoredImageId;
+  }, [imageStates]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -519,13 +551,13 @@ export function ChallengeWorkspace({
       setJob((current) =>
         current
           ? {
-              ...current,
-              status: "failed",
-              progress: 1,
-              message: "Segmentation failed",
-              updated_at: new Date().toISOString(),
-              error: message,
-            }
+            ...current,
+            status: "failed",
+            progress: 1,
+            message: "Segmentation failed",
+            updated_at: new Date().toISOString(),
+            error: message,
+          }
           : null,
       );
       setErrorMessage(message);
@@ -596,19 +628,19 @@ export function ChallengeWorkspace({
       layers: current.layers.map((layer) =>
         layer.mask_id === activeLayer.mask_id
           ? replaceMaskLayerData(
-              layer,
-              updateMaskWithBrush(
-                shouldCommitCurrentCandidates
-                  ? mergeMaskData([layer.data, nextBrushSeedMask], current.width, current.height)
-                  : layer.data,
-                current.width,
-                current.height,
-                x,
-                y,
-                brushRadius,
-                draw,
-              ),
-            )
+            layer,
+            updateMaskWithBrush(
+              shouldCommitCurrentCandidates
+                ? mergeMaskData([layer.data, nextBrushSeedMask], current.width, current.height)
+                : layer.data,
+              current.width,
+              current.height,
+              x,
+              y,
+              brushRadius,
+              draw,
+            ),
+          )
           : layer,
       ),
     }));
@@ -662,9 +694,9 @@ export function ChallengeWorkspace({
       layers: current.layers.map((layer) =>
         layer.mask_id === maskId
           ? {
-              ...layer,
-              label,
-            }
+            ...layer,
+            label,
+          }
           : layer,
       ),
     }));
@@ -710,6 +742,7 @@ export function ChallengeWorkspace({
     try {
       setErrorMessage(null);
       setCompletionMessage(null);
+      setStoreToast(null);
 
       const selectedCandidates =
         selectedCandidateId === null
@@ -727,6 +760,10 @@ export function ChallengeWorkspace({
           stored: true,
           stored_at: storedAt,
         };
+      });
+      setStoreToast({
+        id: Date.now(),
+        message: "Mask stored",
       });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Failed to store mask.");
@@ -807,6 +844,7 @@ export function ChallengeWorkspace({
             images={images}
             activeImageId={currentImage?.image_id ?? null}
             completedImageIds={completedImageIds}
+            highlightedImageId={highlightedImageId}
             isLoading={imagesLoading}
             errorMessage={imagesErrorMessage}
             onSelectImage={(imageId) => {
@@ -927,14 +965,21 @@ export function ChallengeWorkspace({
             >
               Reset Current Image
             </button>
-            <button
-              type="button"
+            <div className="store-mask-toast-anchor">
+              <button
+                type="button"
                 className="secondary-button store-mask-button"
-              disabled={!session || isBusy}
-              onClick={() => void handleStoreMask()}
-            >
-              Store Mask
-            </button>
+                disabled={!session || isBusy}
+                onClick={() => void handleStoreMask()}
+              >
+                {storeToast ? "Stored" : "Store Mask"}
+              </button>
+              {storeToast ? (
+                <div key={storeToast.id} className="store-mask-toast" aria-live="polite">
+                  {storeToast.message}
+                </div>
+              ) : null}
+            </div>
             {job ? <div className="field-note">{job.message}</div> : null}
             {errorMessage ? <div className="error-banner inline-error">{errorMessage}</div> : null}
           </div>

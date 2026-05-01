@@ -151,9 +151,8 @@ export function ResultsPanel({
                 <button
                   key={candidate.candidate_id}
                   type="button"
-                  className={`mask-card ${
-                    candidate.candidate_id === selectedCandidateId ? "is-active" : ""
-                  } ${!isAboveThreshold ? "is-below-threshold" : ""}`.trim()}
+                  className={`mask-card ${candidate.candidate_id === selectedCandidateId ? "is-active" : ""
+                    } ${!isAboveThreshold ? "is-below-threshold" : ""}`.trim()}
                   aria-disabled={!isAboveThreshold}
                   onClick={() => handleCandidateSelect(candidate)}
                 >

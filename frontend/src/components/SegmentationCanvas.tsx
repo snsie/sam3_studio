@@ -493,9 +493,8 @@ export function SegmentationCanvas({
               return (
                 <img
                   key={mask.candidate_id}
-                  className={`viewer-mask ${
-                    selectedCandidateId === mask.candidate_id ? "is-selected" : ""
-                  }`}
+                  className={`viewer-mask ${selectedCandidateId === mask.candidate_id ? "is-selected" : ""
+                    }`}
                   src={mask.image_data_url}
                   alt={`Mask ${maskNumber}`}
                   style={{ opacity: overlayOpacity }}
@@ -555,9 +554,8 @@ export function SegmentationCanvas({
                 <button
                   key={`${mask.candidate_id}-button`}
                   type="button"
-                  className={`mask-label-button ${
-                    selectedCandidateId === mask.candidate_id ? "is-active" : ""
-                  }`}
+                  className={`mask-label-button ${selectedCandidateId === mask.candidate_id ? "is-active" : ""
+                    }`}
                   style={{
                     left: centerX,
                     top: centerY,

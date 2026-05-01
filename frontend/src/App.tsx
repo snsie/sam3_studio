@@ -34,7 +34,10 @@ export default function App() {
         <ChallengesPage onHeaderStateChange={setActiveChallengeState} />
       </section>
       <section className={`page-view${activePage === "leaderboard" ? " is-active" : ""}`} hidden={activePage !== "leaderboard"}>
-        <LeaderboardPage onHeaderStateChange={setLeaderboardState} />
+        <LeaderboardPage
+          isActive={activePage === "leaderboard"}
+          onHeaderStateChange={setLeaderboardState}
+        />
       </section>
     </div>
   );
