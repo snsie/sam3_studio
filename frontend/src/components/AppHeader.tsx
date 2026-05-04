@@ -50,7 +50,7 @@ export function AppHeader({
       <section className="app-header-pane app-header-sandbox-pane">
         <ImageUploader
           disabled={sandboxState.disabled}
-          currentFilename={sandboxState.currentFilename}
+          // currentFilename={sandboxState.currentFilename}
           onUpload={sandboxState.onUpload}
           variant="header"
         />

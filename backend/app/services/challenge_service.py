@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-from collections import deque
 import re
 from dataclasses import dataclass
 from io import BytesIO
@@ -46,6 +45,8 @@ MASK_COLORS: dict[ChallengeType, list[tuple[str, tuple[int, int, int]]]] = {
         ("Channel 9", (250, 204, 21)),
     ],
 }
+MULTI_CLASS_LABEL_VALUE_COUNT = 6
+MIN_MULTI_CLASS_MASK_AREA = 8
 
 PAIRING_PREFIX_PATTERN = re.compile(
     r"^(?:images|image|masks|mask|labels|label)[_-]*", re.IGNORECASE
@@ -231,7 +232,7 @@ class ChallengeService:
             and len(record.masks) == 1
             and record.masks[0].mask_id == "label-map"
         ):
-            return self._extract_instance_masks(record.masks[0].path)
+            return self._extract_multi_class_masks(record.masks[0].path)
         return [self._read_mask(mask.path) for mask in record.masks]
 
     def build_image_url(self, challenge_id: ChallengeType, image_id: str) -> str:
@@ -409,16 +410,16 @@ class ChallengeService:
 
     def _build_overlay_data_url(self, record: ChallengeImageRecord) -> str:
         if len(record.masks) == 1 and record.masks[0].mask_id == "label-map":
-            instance_masks = self._extract_instance_masks(record.masks[0].path)
-            if not instance_masks:
+            class_masks = self._extract_multi_class_masks(record.masks[0].path)
+            if not class_masks:
                 first_mask = self._read_mask(record.masks[0].path)
-                instance_masks = [first_mask]
+                class_masks = [first_mask]
             overlay = np.zeros(
-                (instance_masks[0].shape[0], instance_masks[0].shape[1], 4),
+                (class_masks[0].shape[0], class_masks[0].shape[1], 4),
                 dtype=np.uint8,
             )
             palette = [color for _, color in MASK_COLORS[ChallengeType.MULTI_CLASS]]
-            for index, mask in enumerate(instance_masks):
+            for index, mask in enumerate(class_masks):
                 color = palette[index % len(palette)]
                 overlay[mask] = (*color, 255)
             buffer = BytesIO()
@@ -447,45 +448,20 @@ class ChallengeService:
     def _read_mask(self, mask_path: Path) -> np.ndarray:
         return np.asarray(Image.open(mask_path).convert("L")) > 0
 
-    def _extract_instance_masks(self, mask_path: Path) -> list[np.ndarray]:
-        # The workshop's multi-class labels are JPEG-compressed grayscale label maps.
-        # We convert them into per-object binary masks by thresholding foreground and
-        # splitting connected components so the scorer can best-match user mask IDs.
+    def _extract_multi_class_masks(self, mask_path: Path) -> list[np.ndarray]:
+        # The normalized workshop dataset keeps only the label channel, and those class
+        # IDs were exported as lossy JPEGs. Quantizing back onto the original 0..6 label
+        # levels preserves one mask per class so the same class shares one mask ID.
         label_map = np.asarray(Image.open(mask_path).convert("L"))
-        foreground = label_map > 15
-        visited = np.zeros_like(foreground, dtype=bool)
+        quantized = np.rint(
+            label_map.astype(np.float32) * MULTI_CLASS_LABEL_VALUE_COUNT / 255.0
+        ).astype(np.uint8)
         masks: list[np.ndarray] = []
-
-        for row in range(foreground.shape[0]):
-            for column in range(foreground.shape[1]):
-                if not foreground[row, column] or visited[row, column]:
-                    continue
-
-                component = np.zeros_like(foreground, dtype=bool)
-                queue = deque([(row, column)])
-                visited[row, column] = True
-
-                while queue:
-                    current_row, current_column = queue.popleft()
-                    component[current_row, current_column] = True
-                    for next_row, next_column in (
-                        (current_row - 1, current_column),
-                        (current_row + 1, current_column),
-                        (current_row, current_column - 1),
-                        (current_row, current_column + 1),
-                    ):
-                        if (
-                            0 <= next_row < foreground.shape[0]
-                            and 0 <= next_column < foreground.shape[1]
-                            and foreground[next_row, next_column]
-                            and not visited[next_row, next_column]
-                        ):
-                            visited[next_row, next_column] = True
-                            queue.append((next_row, next_column))
-
-                if component.sum() >= 8:
-                    masks.append(component)
-
+        for label_value in range(1, MULTI_CLASS_LABEL_VALUE_COUNT + 1):
+            mask = quantized == label_value
+            if int(mask.sum()) < MIN_MULTI_CLASS_MASK_AREA:
+                continue
+            masks.append(mask)
         return masks
 
     def _normalize_pairing_key(self, stem: str) -> str:

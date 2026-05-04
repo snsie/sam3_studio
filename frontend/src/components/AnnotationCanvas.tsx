@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type {
   BrushMode,
@@ -191,18 +191,6 @@ export function AnnotationCanvas({
     };
   }, [hasImage]);
 
-  useEffect(() => {
-    const canvas = editableCanvasRef.current;
-    if (!canvas || !imageWidth || !imageHeight) {
-      return;
-    }
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return;
-    }
-    drawLayersToCanvas(context, layers, imageWidth, imageHeight, overlayOpacity);
-  }, [imageHeight, imageWidth, layers, overlayOpacity]);
-
   const displayFrame = useMemo(() => {
     const baseFrame = getDisplayFrame(stageSize.width, stageSize.height, imageWidth, imageHeight);
     if (!baseFrame) {
@@ -216,6 +204,28 @@ export function AnnotationCanvas({
       height: baseFrame.height * view.scale,
     };
   }, [imageHeight, imageWidth, stageSize.height, stageSize.width, view.scale, view.x, view.y]);
+
+  useLayoutEffect(() => {
+    const canvas = editableCanvasRef.current;
+    if (!canvas || !displayFrame || !imageWidth || !imageHeight) {
+      return;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    const draw = () => {
+      drawLayersToCanvas(context, layers, imageWidth, imageHeight, overlayOpacity);
+    };
+
+    draw();
+    const frameId = window.requestAnimationFrame(draw);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [displayFrame, imageHeight, imageWidth, layers, overlayOpacity]);
 
   const getImagePoint = (clientX: number, clientY: number): ImagePoint | null => {
     const stage = stageRef.current;

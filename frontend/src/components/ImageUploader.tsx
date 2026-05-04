@@ -2,14 +2,13 @@ import { useRef, useState } from "react";
 
 interface ImageUploaderProps {
   disabled: boolean;
-  currentFilename: string | null;
+  // currentFilename: string | null;
   onUpload: (file: File) => Promise<void>;
   variant?: "panel" | "header";
 }
 
 export function ImageUploader({
   disabled,
-  currentFilename,
   onUpload,
   variant = "panel",
 }: ImageUploaderProps) {
@@ -54,9 +53,9 @@ export function ImageUploader({
         <span className="upload-subtitle">
           PNG, JPG, JPEG, or WEBP. Click to browse.
         </span>
-        {currentFilename ? (
+        {/* {currentFilename ? (
           <span className="upload-current">Current: {currentFilename}</span>
-        ) : null}
+        ) : null} */}
       </button>
       <input
         ref={inputRef}

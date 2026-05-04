@@ -51,8 +51,13 @@ button {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   padding: 14px;
   overflow: hidden;
+}
+
+.app-shell.is-sandbox {
+  padding-bottom: 0;
 }
 
 .background-grid {
@@ -116,8 +121,10 @@ button {
   flex: 1;
   min-height: 0;
   grid-template-columns: minmax(300px, 370px) minmax(0, 1fr) minmax(252px, 308px);
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   align-items: stretch;
+  overflow: hidden;
 }
 
 .control-panel,
@@ -138,6 +145,13 @@ button {
 .control-panel,
 .results-panel {
   overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.sandbox-right-column {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .sandbox-right-column>.results-panel {
@@ -264,7 +278,8 @@ button {
 }
 
 .text-input {
-  resize: vertical;
+  resize: none;
+  overflow-y: auto;
   min-height: 72px;
   padding: 10px 12px;
   border-radius: 16px;
@@ -990,7 +1005,9 @@ button {
 }
 
 .app-header-pane-actions {
+  flex-direction: column;
   justify-content: flex-end;
+  align-items: flex-end;
   flex-shrink: 0;
 }
 
@@ -1896,6 +1913,7 @@ button {
 
   .app-header-pane-actions {
     justify-content: flex-start;
+    align-items: flex-start;
   }
 
   .challenge-selector-grid,

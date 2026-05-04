@@ -106,10 +106,11 @@ export function drawLayersToCanvas(
   opacity: number,
 ) {
   context.clearRect(0, 0, width, height);
+  const imageData = context.createImageData(width, height);
+
   layers.forEach((layer) => {
     const [red, green, blue] = layer.color_rgb;
     const alpha = Math.round(opacity * 170);
-    const imageData = context.createImageData(width, height);
     for (let index = 0; index < layer.data.length; index += 1) {
       if (layer.data[index] === 0) {
         continue;
@@ -120,8 +121,9 @@ export function drawLayersToCanvas(
       imageData.data[pixelIndex + 2] = blue;
       imageData.data[pixelIndex + 3] = alpha;
     }
-    context.putImageData(imageData, 0, 0);
   });
+
+  context.putImageData(imageData, 0, 0);
 }
 
 export function serializeMaskToDataUrl(

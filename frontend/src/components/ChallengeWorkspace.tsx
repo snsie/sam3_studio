@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createSegmentationJob,
@@ -207,6 +207,15 @@ function applyStoredMasks(
   };
 }
 
+interface MaskDraftState {
+  result: SegmentationResult | null;
+  displayCandidates: MaskCandidate[];
+  selectedCandidateId: string | null;
+  mergedMaskData: Uint8ClampedArray | null;
+}
+
+const EMPTY_MASK_DRAFTS: Record<string, MaskDraftState> = {};
+
 export function ChallengeWorkspace({
   challenge,
   images,
@@ -241,9 +250,16 @@ export function ChallengeWorkspace({
   const [storeToast, setStoreToast] = useState<{ id: number; message: string } | null>(null);
   const [showExamples, setShowExamples] = useState(false);
   const [displayCandidates, setDisplayCandidates] = useState<MaskCandidate[]>([]);
-  const [brushSeedMask, setBrushSeedMask] = useState<Uint8ClampedArray | null>(null);
+  const [draftImageId, setDraftImageId] = useState<string | null>(null);
+  const [maskDraftsById, setMaskDraftsById] = useState<Record<string, MaskDraftState>>({});
+  const draftResultScopeRef = useRef<string | null>(null);
+  const draftMaskScopeRef = useRef<string | null>(null);
 
   const currentImage = images[selectedImageIndex] ?? null;
+  const currentImageDrafts = useMemo(
+    () => (draftImageId === currentImage?.image_id ? maskDraftsById : EMPTY_MASK_DRAFTS),
+    [draftImageId, currentImage?.image_id, maskDraftsById],
+  );
   const deferredResult = useDeferredValue(result);
 
   useEffect(() => {
@@ -259,6 +275,12 @@ export function ChallengeWorkspace({
       window.clearTimeout(timeoutId);
     };
   }, [storeToast]);
+
+  useEffect(() => {
+    setDraftImageId(currentImage?.image_id ?? null);
+    setMaskDraftsById({});
+    setDisplayCandidates([]);
+  }, [currentImage?.image_id]);
 
   const visibleCandidates = useMemo(() => {
     if (!deferredResult || deferredResult.candidates.length === 0) {
@@ -295,19 +317,6 @@ export function ChallengeWorkspace({
     );
     return selectedCandidate ? [selectedCandidate] : displayCandidates;
   }, [displayCandidates, selectedCandidateId]);
-
-  const editableCandidates = useMemo(() => {
-    if (visibleCandidates.length === 0) {
-      return [];
-    }
-    if (selectedCandidateId === null) {
-      return visibleCandidates;
-    }
-    const selectedCandidate = visibleCandidates.find(
-      (candidate) => candidate.candidate_id === selectedCandidateId,
-    );
-    return selectedCandidate ? [selectedCandidate] : [];
-  }, [selectedCandidateId, visibleCandidates]);
 
   const completedImageIds = useMemo(
     () =>
@@ -443,22 +452,125 @@ export function ChallengeWorkspace({
     );
   }, [currentImageState]);
 
+  const activeDraftMask = useMemo(() => {
+    if (!activeLayer) {
+      return null;
+    }
+    return currentImageDrafts[activeLayer.mask_id]?.mergedMaskData ?? null;
+  }, [activeLayer, currentImageDrafts]);
+
+  const activeDraftScopeKey = useMemo(() => {
+    if (!currentImage?.image_id || !currentImageState?.active_mask_id) {
+      return null;
+    }
+    return `${currentImage.image_id}:${currentImageState.active_mask_id}`;
+  }, [currentImage?.image_id, currentImageState?.active_mask_id]);
+
   const canvasLayers = useMemo(() => {
     if (!currentImageState) {
       return [];
     }
-    if (challenge.challenge_id !== "multi-class" || brushMode === "off" || !activeLayer) {
+
+    if (challenge.challenge_id !== "multi-class") {
       return currentImageState.layers;
     }
-    return [activeLayer];
-  }, [activeLayer, brushMode, challenge.challenge_id, currentImageState]);
+
+    const mergedLayers = currentImageState.layers.map((layer) => {
+      const draftMask = currentImageDrafts[layer.mask_id]?.mergedMaskData;
+      if (!draftMask) {
+        return layer;
+      }
+
+      return replaceMaskLayerData(
+        layer,
+        mergeMaskData([layer.data, draftMask], currentImageState.width, currentImageState.height),
+      );
+    });
+
+    return mergedLayers;
+  }, [challenge.challenge_id, currentImageDrafts, currentImageState]);
 
   const canvasSamMasks = useMemo(() => {
-    if (challenge.challenge_id === "multi-class" && brushMode !== "off") {
+    if (challenge.challenge_id === "multi-class") {
+      return [];
+    }
+    if (brushMode !== "off") {
       return [];
     }
     return visibleMasks;
   }, [brushMode, challenge.challenge_id, visibleMasks]);
+
+  useEffect(() => {
+    if (challenge.challenge_id !== "multi-class") {
+      return;
+    }
+
+    const activeMaskId = currentImageState?.active_mask_id;
+    if (!activeMaskId) {
+      setResult(null);
+      setSelectedCandidateId(null);
+      setDisplayCandidates([]);
+      return;
+    }
+
+    const draft = currentImageDrafts[activeMaskId];
+    setResult(draft?.result ?? null);
+    setSelectedCandidateId(draft?.selectedCandidateId ?? null);
+    setDisplayCandidates(draft?.displayCandidates ?? []);
+  }, [challenge.challenge_id, currentImage?.image_id, currentImageState?.active_mask_id]);
+
+  useEffect(() => {
+    if (
+      challenge.challenge_id !== "multi-class" ||
+      draftImageId !== currentImage?.image_id ||
+      !currentImageState?.active_mask_id ||
+      !activeDraftScopeKey
+    ) {
+      return;
+    }
+
+    if (draftResultScopeRef.current !== activeDraftScopeKey) {
+      draftResultScopeRef.current = activeDraftScopeKey;
+      return;
+    }
+
+    const activeMaskId = currentImageState.active_mask_id;
+
+    setMaskDraftsById((current) => {
+      const previous = current[activeMaskId];
+      const previousMergedMask = previous?.mergedMaskData ?? null;
+
+      if (result === null && selectedCandidateId === null && previousMergedMask === null) {
+        if (!(activeMaskId in current)) {
+          return current;
+        }
+        const { [activeMaskId]: _removed, ...rest } = current;
+        return rest;
+      }
+
+      if (previous?.result === result && previous?.selectedCandidateId === selectedCandidateId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [activeMaskId]: {
+          result,
+          displayCandidates: previous?.displayCandidates ?? [],
+          selectedCandidateId,
+          mergedMaskData: previousMergedMask,
+        },
+      };
+    });
+  }, [
+    challenge.challenge_id,
+    currentImage?.image_id,
+    currentImageState?.active_mask_id,
+    activeDraftScopeKey,
+    draftImageId,
+    result,
+    selectedCandidateId,
+  ]);
 
   useEffect(() => {
     if (visibleCandidates.length === 0) {
@@ -494,36 +606,107 @@ export function ChallengeWorkspace({
   }, [activeLayer, visibleCandidates]);
 
   useEffect(() => {
-    if (editableCandidates.length === 0) {
-      setBrushSeedMask(null);
+    if (
+      challenge.challenge_id !== "multi-class" ||
+      draftImageId !== currentImage?.image_id ||
+      !currentImageState?.active_mask_id
+    ) {
+      return;
+    }
+
+    const activeMaskId = currentImageState.active_mask_id;
+
+    setMaskDraftsById((current) => {
+      const previous = current[activeMaskId];
+      const nextDisplayCandidates = displayCandidates;
+
+      if (previous?.displayCandidates === nextDisplayCandidates) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [activeMaskId]: {
+          result: previous?.result ?? result,
+          displayCandidates: nextDisplayCandidates,
+          selectedCandidateId: previous?.selectedCandidateId ?? selectedCandidateId,
+          mergedMaskData: previous?.mergedMaskData ?? null,
+        },
+      };
+    });
+  }, [
+    challenge.challenge_id,
+    currentImage?.image_id,
+    currentImageState?.active_mask_id,
+    displayCandidates,
+    draftImageId,
+    result,
+    selectedCandidateId,
+  ]);
+
+  useEffect(() => {
+    if (
+      challenge.challenge_id !== "multi-class" ||
+      draftImageId !== currentImage?.image_id ||
+      !currentImageState?.active_mask_id ||
+      !activeDraftScopeKey
+    ) {
+      return;
+    }
+
+    if (draftMaskScopeRef.current !== activeDraftScopeKey) {
+      draftMaskScopeRef.current = activeDraftScopeKey;
+      return;
+    }
+
+    const activeMaskId = currentImageState.active_mask_id;
+
+    if (!result || visibleMasks.length === 0) {
       return;
     }
 
     let isCurrent = true;
 
-    const seedBrushMask = async () => {
+    const cacheDraftMask = async () => {
       try {
         const decodedMasks = await Promise.all(
-          editableCandidates.map((candidate) => candidateMaskToMaskData(candidate)),
+          visibleMasks.map((candidate) => candidateMaskToMaskData(candidate)),
         );
         if (!isCurrent) {
           return;
         }
-        setBrushSeedMask(
-          mergeMaskData(decodedMasks, editableCandidates[0].width, editableCandidates[0].height),
-        );
+        const mergedMask = mergeMaskData(decodedMasks, currentImageState.width, currentImageState.height);
+        setMaskDraftsById((current) => ({
+          ...current,
+          [activeMaskId]: {
+            result,
+            displayCandidates: current[activeMaskId]?.displayCandidates ?? displayCandidates,
+            selectedCandidateId,
+            mergedMaskData: mergedMask,
+          },
+        }));
       } catch {
-        if (isCurrent) {
-          setBrushSeedMask(null);
-        }
+        return;
       }
     };
 
-    void seedBrushMask();
+    void cacheDraftMask();
     return () => {
       isCurrent = false;
     };
-  }, [editableCandidates]);
+  }, [
+    challenge.challenge_id,
+    currentImage?.image_id,
+    currentImageState?.active_mask_id,
+    currentImageState?.height,
+    currentImageState?.width,
+    activeDraftScopeKey,
+    draftImageId,
+    displayCandidates,
+    result,
+    selectedCandidateId,
+    visibleMasks,
+  ]);
 
   const handleSubmit = async (request: SegmentationRequest) => {
     try {
@@ -588,6 +771,8 @@ export function ChallengeWorkspace({
       setJob(null);
       setSelectedCandidateId(null);
       setTextPrompt("");
+      setDisplayCandidates([]);
+      setMaskDraftsById({});
       onUpdateImageState(currentImage.image_id, () =>
         createDefaultImageState(challenge.challenge_id, currentImage.image_id, currentImageState.width, currentImageState.height),
       );
@@ -615,13 +800,37 @@ export function ChallengeWorkspace({
     });
   };
 
+  const clearPromptState = () => {
+    setPoints([]);
+    setBoxes([]);
+    setTextPrompt("");
+    setJob(null);
+    setDisplayCandidates([]);
+    setErrorMessage(null);
+  };
+
+  const clearMaskDraft = (maskId: string) => {
+    setMaskDraftsById((current) => {
+      if (!(maskId in current)) {
+        return current;
+      }
+      const { [maskId]: _removed, ...rest } = current;
+      return rest;
+    });
+
+    if (currentImageState?.active_mask_id === maskId) {
+      setResult(null);
+      setSelectedCandidateId(null);
+      setDisplayCandidates([]);
+    }
+  };
+
   const handleBrushStroke = (x: number, y: number, draw: boolean) => {
     if (!activeLayer || !currentImageState) {
       return;
     }
-    const nextBrushSeedMask = brushSeedMask;
-    const shouldCommitCurrentCandidates =
-      nextBrushSeedMask !== null && editableCandidates.length > 0;
+    const shouldCommitCurrentDraft =
+      challenge.challenge_id === "multi-class" && activeDraftMask !== null;
 
     updateCurrentImageState((current) => ({
       ...current,
@@ -630,8 +839,8 @@ export function ChallengeWorkspace({
           ? replaceMaskLayerData(
             layer,
             updateMaskWithBrush(
-              shouldCommitCurrentCandidates
-                ? mergeMaskData([layer.data, nextBrushSeedMask], current.width, current.height)
+              shouldCommitCurrentDraft && activeDraftMask
+                ? mergeMaskData([layer.data, activeDraftMask], current.width, current.height)
                 : layer.data,
               current.width,
               current.height,
@@ -645,29 +854,16 @@ export function ChallengeWorkspace({
       ),
     }));
 
-    if (shouldCommitCurrentCandidates) {
-      setResult(null);
-      setSelectedCandidateId(null);
-      setDisplayCandidates([]);
+    if (shouldCommitCurrentDraft) {
+      clearMaskDraft(activeLayer.mask_id);
     }
-  };
-
-  const clearMaskEditingState = () => {
-    setPoints([]);
-    setBoxes([]);
-    setTextPrompt("");
-    setResult(null);
-    setJob(null);
-    setSelectedCandidateId(null);
-    setDisplayCandidates([]);
-    setErrorMessage(null);
   };
 
   const handleAddMask = () => {
     if (!currentImageState) {
       return;
     }
-    clearMaskEditingState();
+    clearPromptState();
     updateCurrentImageState((current) => {
       const nextIndex = current.layers.length;
       const nextLayer = createMaskLayer(
@@ -706,6 +902,7 @@ export function ChallengeWorkspace({
     if (!currentImageState) {
       return;
     }
+    clearMaskDraft(maskId);
     updateCurrentImageState((current) => {
       const nextLayers = normalizeMaskLayerColors(
         challenge.challenge_id,
@@ -744,23 +941,18 @@ export function ChallengeWorkspace({
       setCompletionMessage(null);
       setStoreToast(null);
 
-      const selectedCandidates =
-        selectedCandidateId === null
-          ? visibleCandidates
-          : visibleCandidates.filter((candidate) => candidate.candidate_id === selectedCandidateId);
-      const decodedMasks = await Promise.all(
-        selectedCandidates.map((candidate) => candidateMaskToMaskData(candidate)),
-      );
-
       const storedAt = new Date().toISOString();
       updateCurrentImageState((current) => {
-        const nextState = applyStoredMasks(current, decodedMasks);
+        const nextState = activeDraftMask ? applyStoredMasks(current, [activeDraftMask]) : current;
         return {
           ...nextState,
           stored: true,
           stored_at: storedAt,
         };
       });
+      if (activeLayer) {
+        clearMaskDraft(activeLayer.mask_id);
+      }
       setStoreToast({
         id: Date.now(),
         message: "Mask stored",
@@ -1004,7 +1196,7 @@ export function ChallengeWorkspace({
               disabled={!session || isBusy}
               onAddMask={handleAddMask}
               onSelectMask={(maskId) => {
-                clearMaskEditingState();
+                clearPromptState();
                 updateCurrentImageState((current) => ({
                   ...current,
                   active_mask_id: maskId,

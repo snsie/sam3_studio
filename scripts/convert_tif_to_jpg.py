@@ -5,7 +5,6 @@ import argparse
 from pathlib import Path
 import sys
 
-
 DEFAULT_INPUT_DIR = (
     Path(__file__).resolve().parents[1]
     / "datasets"
@@ -19,13 +18,10 @@ def parse_args() -> argparse.Namespace:
         description="Convert .tif images in a directory to .jpg files in a sibling output directory."
     )
     parser.add_argument(
-        "input_dir",
+        "--input_dir",
         nargs="?",
         default=str(DEFAULT_INPUT_DIR),
-        help=(
-            "Directory containing .tif images. "
-            f"Defaults to: {DEFAULT_INPUT_DIR}"
-        ),
+        help=("Directory containing .tif images. " f"Defaults to: {DEFAULT_INPUT_DIR}"),
     )
     parser.add_argument(
         "--output-dir",
@@ -85,7 +81,10 @@ def main() -> int:
 
     output_dir = resolve_output_dir(input_dir, args.output_dir)
     if output_dir == input_dir:
-        print("Output directory must be different from the input directory.", file=sys.stderr)
+        print(
+            "Output directory must be different from the input directory.",
+            file=sys.stderr,
+        )
         return 1
 
     converted_count = convert_images(input_dir, output_dir, args.quality)

@@ -17,7 +17,7 @@ export default function App() {
   const [leaderboardState, setLeaderboardState] = useState<LeaderboardHeaderState | null>(null);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${activePage === "sandbox" ? " is-sandbox" : ""}`}>
       <div className="background-grid" aria-hidden="true" />
       <AppHeader
         activePage={activePage}

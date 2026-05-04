@@ -1,0 +1,9 @@
+{
+  "best_metrics": {
+    "mean_dice": 0.0,
+    "mean_iou": 0.0
+  },
+  "history": [],
+  "best_checkpoint": "/home/neph-workshop-user/workshop-demo/sam3_studio/tmp_sam3_lora_build_smoke/checkpoints/best_lora.pt",
+  "last_checkpoint": "/home/neph-workshop-user/workshop-demo/sam3_studio/tmp_sam3_lora_build_smoke/checkpoints/last_lora.pt"
+}
