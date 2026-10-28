@@ -72,6 +72,16 @@ Optional frontend variable:
 
 If you want the app to stay strictly offline after startup, provide local checkpoint assets and set `SAM3_LOAD_FROM_HF=false`.
 
+### HiPerGator configuration
+
+The tracked `backend/.env.hipergator.example` records the private-use cluster settings. On HiPerGator, copy it to `backend/.env` and replace the placeholder paths with your group's storage and actual model assets:
+
+```bash
+cp backend/.env.hipergator.example backend/.env
+```
+
+Stage challenge datasets into `CHALLENGE_DATASETS_DIR` if you use them. The template uses one model worker and requires CUDA; start the backend inside a Slurm GPU allocation and access it through an SSH tunnel. Dotenv settings do not request cluster resources or prevent job expiration or idle-GPU termination. The active `backend/.env` remains ignored by Git; keep credentials out of the tracked template.
+
 ## Run Locally
 
 Start the backend in one terminal:
