@@ -64,6 +64,13 @@ class Settings(BaseSettings):
         default=0.5,
         alias="SAM3_CONFIDENCE_THRESHOLD",
     )
+    # Cached image embeddings live on the GPU and each worker keeps its own cache, so an
+    # unbounded cache exhausts VRAM once users browse enough images. 0 disables the bound.
+    sam3_max_cached_sessions: int = Field(
+        default=8,
+        alias="SAM3_MAX_CACHED_SESSIONS",
+        ge=0,
+    )
 
     @field_validator("frontend_origins", mode="before")
     @classmethod

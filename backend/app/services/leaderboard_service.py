@@ -28,9 +28,9 @@ class LeaderboardService:
         payload = summary.model_dump()
         submitted_at = summary.submitted_at.isoformat()
 
-        with self._lock, sqlite3.connect(
-            self._db_path, check_same_thread=False
-        ) as connection:
+        with self._lock, closing(
+            sqlite3.connect(self._db_path, check_same_thread=False)
+        ) as connection, connection:
             try:
                 connection.execute(
                     """
@@ -101,9 +101,9 @@ class LeaderboardService:
             params = (challenge_id,)
         query += " ORDER BY overall_score DESC, submitted_at ASC, user_name ASC"
 
-        with self._lock, sqlite3.connect(
-            self._db_path, check_same_thread=False
-        ) as connection:
+        with self._lock, closing(
+            sqlite3.connect(self._db_path, check_same_thread=False)
+        ) as connection, connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(query, params).fetchall()
 
@@ -120,9 +120,9 @@ class LeaderboardService:
         raise ValueError("Leaderboard entry not found.")
 
     def _initialize(self) -> None:
-        with self._lock, sqlite3.connect(
-            self._db_path, check_same_thread=False
-        ) as connection:
+        with self._lock, closing(
+            sqlite3.connect(self._db_path, check_same_thread=False)
+        ) as connection, connection:
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS leaderboard_entries (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

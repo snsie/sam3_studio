@@ -60,7 +60,7 @@ export function AppHeader({
         <div className="app-header-pane-copy">
           {/* <span className="section-kicker">Active Challenge</span> */}
           <h2>{activeChallengeState.title}</h2>
-          <p className="app-header-pane-note">{activeChallengeState.description}</p>
+          {/* <p className="app-header-pane-note">{activeChallengeState.description}</p> */}
         </div>
         <button
           type="button"
@@ -100,7 +100,7 @@ export function AppHeader({
   return (
     <header className="hero-header app-header-shell">
       <div className="header-copy">
-        <span className="section-kicker">Workshop Studio</span>
+        {/* <span className="section-kicker">Workshop Studio</span> */}
         <h1>SAM3 Studio</h1>
       </div>
       <div className="app-header-nav">

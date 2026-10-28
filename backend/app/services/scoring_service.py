@@ -44,6 +44,7 @@ class ScoringService:
         labeled_dice: list[float] = []
         labeled_pixel_accuracy: list[float] = []
         warnings: list[str] = []
+        rescaled_image_ids: set[str] = set()
         images_labeled = 0
 
         for record in image_records:
@@ -54,27 +55,39 @@ class ScoringService:
                 full_pixel_accuracy.append(0.0)
                 continue
 
-            ground_truth_masks = self._challenge_service.load_ground_truth_masks(
-                challenge_id,
-                record.image_id,
+            # Score on the image's own pixel grid rather than on the first ground-truth
+            # mask: an image can legitimately have no labelled classes at all.
+            reference_shape = self._challenge_service.get_image_shape(
+                challenge_id, record.image_id
             )
-            predicted_masks = [
-                self._decode_mask(layer.image_data_url) for layer in submission.masks
+            ground_truth_masks = [
+                self._resize_mask(mask, reference_shape)
+                for mask in self._challenge_service.load_ground_truth_masks(
+                    challenge_id,
+                    record.image_id,
+                )
             ]
-            predicted_masks = [
-                self._resize_mask(mask, ground_truth_masks[0].shape[::-1])
-                for mask in predicted_masks
-            ]
+            predicted_masks = []
+            for layer in submission.masks:
+                decoded = self._decode_mask(layer.image_data_url)
+                if decoded.shape != reference_shape:
+                    rescaled_image_ids.add(record.image_id)
+                predicted_masks.append(self._resize_mask(decoded, reference_shape))
 
             if challenge_id == ChallengeType.SINGLE_CLASS:
-                prediction = np.zeros_like(ground_truth_masks[0], dtype=bool)
+                ground_truth = (
+                    ground_truth_masks[0]
+                    if ground_truth_masks
+                    else np.zeros(reference_shape, dtype=bool)
+                )
+                prediction = np.zeros(reference_shape, dtype=bool)
                 for mask in predicted_masks:
                     prediction |= mask
-                metrics = self._compute_binary_metrics(
-                    prediction, ground_truth_masks[0]
-                )
+                metrics = self._compute_binary_metrics(prediction, ground_truth)
             else:
-                metrics = self._score_multi_class(predicted_masks, ground_truth_masks)
+                metrics = self._score_multi_class(
+                    predicted_masks, ground_truth_masks, reference_shape
+                )
 
             images_labeled += 1
             full_iou.append(metrics.iou)
@@ -88,6 +101,14 @@ class ScoringService:
         if missing_count > 0:
             warnings.append(
                 f"{missing_count} image(s) were not stored before scoring and were counted as zero-score images."
+            )
+        if rescaled_image_ids:
+            # Silently rescaling would make a client-side sizing bug look like sloppy
+            # annotation, so say so instead.
+            warnings.append(
+                f"{len(rescaled_image_ids)} image(s) were submitted at a different resolution "
+                "than the source image and were rescaled before scoring: "
+                f"{', '.join(sorted(rescaled_image_ids))}."
             )
 
         mean_iou = float(np.mean(full_iou)) if full_iou else 0.0
@@ -151,9 +172,16 @@ class ScoringService:
         self,
         predicted_masks: list[np.ndarray],
         ground_truth_masks: list[np.ndarray],
+        reference_shape: tuple[int, int],
     ) -> BinaryMetrics:
         if not ground_truth_masks:
-            return BinaryMetrics(iou=0.0, dice=0.0, pixel_accuracy=0.0)
+            # Some label maps are genuinely empty. Score them like the single-class path:
+            # an empty submission is correct, anything drawn is a false positive.
+            empty = np.zeros(reference_shape, dtype=bool)
+            prediction = np.zeros(reference_shape, dtype=bool)
+            for mask in predicted_masks:
+                prediction |= mask
+            return self._compute_binary_metrics(prediction, empty)
 
         matched_predictions, unmatched_predictions = self._match_predictions(
             predicted_masks, ground_truth_masks
@@ -253,17 +281,25 @@ class ScoringService:
     def _decode_mask(self, image_data_url: str) -> np.ndarray:
         _, encoded = image_data_url.split(",", 1)
         image_bytes = base64.b64decode(encoded)
-        image = Image.open(BytesIO(image_bytes)).convert("RGBA")
-        image_array = np.asarray(image)
-        if image_array.shape[-1] == 4:
+        image = Image.open(BytesIO(image_bytes))
+        # convert("RGBA") synthesizes a fully opaque alpha channel for formats that have
+        # none, which would decode a JPEG or opaque-PNG mask as the whole frame. Decide
+        # which channel carries the mask from the source mode, before converting.
+        source_has_alpha = image.mode in {"RGBA", "LA", "PA"} or (
+            image.mode == "P" and "transparency" in image.info
+        )
+        image_array = np.asarray(image.convert("RGBA"))
+        if source_has_alpha:
             return image_array[..., 3] > 0
         return np.any(image_array[..., :3] > 0, axis=-1)
 
-    def _resize_mask(self, mask: np.ndarray, size: tuple[int, int]) -> np.ndarray:
-        if (mask.shape[1], mask.shape[0]) == size:
+    def _resize_mask(self, mask: np.ndarray, shape: tuple[int, int]) -> np.ndarray:
+        """Remaps a mask onto `shape`, given as numpy's (height, width)."""
+        if mask.shape == shape:
             return mask
+        height, width = shape
         resized = Image.fromarray((mask.astype(np.uint8) * 255), mode="L").resize(
-            size,
+            (width, height),
             Image.Resampling.NEAREST,
         )
         return np.asarray(resized) > 0

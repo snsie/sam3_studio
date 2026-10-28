@@ -36,12 +36,14 @@ class SessionAsset:
     created_at: datetime = field(default_factory=utcnow)
     cache_version: int = 0
     cache_ready: bool = False
+    source_key: str | None = None
 
 
 class SAM3Service:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._sessions: dict[str, SessionAsset] = {}
+        self._sessions_by_source: dict[str, str] = {}
         self._sessions_lock = Lock()
 
     def create_session(
@@ -50,7 +52,16 @@ class SAM3Service:
         content_type: str | None,
         content: bytes,
         challenge_id: ChallengeType | None = None,
+        source_key: str | None = None,
     ) -> UploadResponse:
+        # Callers that re-open a fixed asset (challenge images) pass a stable source_key so
+        # revisiting an image reuses its session instead of writing another copy to disk and
+        # discarding the worker's cached embeddings.
+        if source_key is not None:
+            existing = self._find_session_by_source(source_key)
+            if existing is not None:
+                return self._build_upload_response(existing)
+
         if len(content) > self._settings.max_upload_size_mb * 1024 * 1024:
             raise ValueError(
                 f"Uploaded image exceeds the {self._settings.max_upload_size_mb} MB limit."
@@ -80,17 +91,38 @@ class SAM3Service:
             width=image.width,
             height=image.height,
             challenge_id=challenge_id,
+            source_key=source_key,
         )
         with self._sessions_lock:
             self._sessions[session_id] = asset
+            if source_key is not None:
+                self._sessions_by_source[source_key] = session_id
 
+        return self._build_upload_response(asset)
+
+    def _find_session_by_source(self, source_key: str) -> SessionAsset | None:
+        with self._sessions_lock:
+            session_id = self._sessions_by_source.get(source_key)
+            if session_id is None:
+                return None
+            asset = self._sessions.get(session_id)
+            if asset is None:
+                self._sessions_by_source.pop(source_key, None)
+                return None
+            if not asset.image_path.exists():
+                self._sessions.pop(session_id, None)
+                self._sessions_by_source.pop(source_key, None)
+                return None
+            return asset
+
+    def _build_upload_response(self, asset: SessionAsset) -> UploadResponse:
         return UploadResponse(
-            session_id=session_id,
+            session_id=asset.session_id,
             filename=asset.filename,
             content_type=asset.content_type,
             width=asset.width,
             height=asset.height,
-            image_url=f"{self._settings.api_prefix}/sessions/{session_id}/image",
+            image_url=f"{self._settings.api_prefix}/sessions/{asset.session_id}/image",
             created_at=asset.created_at,
         )
 

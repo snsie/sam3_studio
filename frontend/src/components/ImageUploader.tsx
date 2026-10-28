@@ -63,8 +63,12 @@ export function ImageUploader({
         accept="image/png,image/jpeg,image/webp"
         hidden
         onChange={async (event) => {
-          await handleFiles(event.target.files);
-          event.currentTarget.value = "";
+          // React clears currentTarget once the listener returns, so capture the input
+          // before awaiting. Without the reset, re-picking the same file fires no change
+          // event and the upload silently does nothing.
+          const input = event.currentTarget;
+          await handleFiles(input.files);
+          input.value = "";
         }}
       />
     </section>

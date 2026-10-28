@@ -95,15 +95,21 @@ class ChallengeService:
         self._definitions: dict[ChallengeType, ChallengeDefinition] = {
             ChallengeType.SINGLE_CLASS: ChallengeDefinition(
                 challenge_id=ChallengeType.SINGLE_CLASS,
-                title="Single-Class Annotation Challenge",
-                description="Create a single binary mask for each microscopy image.",
+                title="BBBC038 Nuclei Segmentation",
+                description=(
+                    "Broad Bioimage Benchmark Collection nuclei images, adapted "
+                    "here as a single foreground-vs-background mask challenge."
+                ),
                 image_dir=datasets_dir / "single_class" / "images",
                 mask_dir=datasets_dir / "single_class" / "masks",
             ),
             ChallengeType.MULTI_CLASS: ChallengeDefinition(
                 challenge_id=ChallengeType.MULTI_CLASS,
-                title="Multi-Class Annotation Challenge",
-                description="Create separate mask IDs for each target structure in the image.",
+                title="CoNIC Colon Nuclei Classification",
+                description=(
+                    "CoNIC colon histology patches, adapted here as a six-class "
+                    "mask-label challenge."
+                ),
                 image_dir=datasets_dir / "multi_class" / "images",
                 mask_dir=datasets_dir / "multi_class" / "labels",
             ),
@@ -173,11 +179,20 @@ class ChallengeService:
             raise ValueError(
                 f"Unsupported challenge image type: {record.image_path.name}"
             )
+        # Challenge images are fixed assets, so key the session to the file itself: revisiting
+        # an image then reuses its session and the worker's cached embeddings instead of
+        # writing another copy of the image to disk. The stat fields invalidate the key if the
+        # dataset file is replaced.
+        stat = record.image_path.stat()
+        source_key = (
+            f"{challenge_id.value}:{record.image_id}:{stat.st_mtime_ns}:{stat.st_size}"
+        )
         session = sam3_service.create_session(
             filename=record.image_path.name,
             content_type=content_type,
             content=record.image_path.read_bytes(),
             challenge_id=challenge_id,
+            source_key=source_key,
         )
         return session.model_copy(
             update={
@@ -211,6 +226,13 @@ class ChallengeService:
 
     def get_image_path(self, challenge_id: ChallengeType, image_id: str) -> Path:
         return self.get_image_record(challenge_id, image_id).image_path
+
+    def get_image_shape(
+        self, challenge_id: ChallengeType, image_id: str
+    ) -> tuple[int, int]:
+        """Returns the challenge image's (height, width), the grid masks are scored on."""
+        with Image.open(self.get_image_path(challenge_id, image_id)) as image:
+            return image.height, image.width
 
     def get_mask_path(
         self, challenge_id: ChallengeType, image_id: str, mask_id: str

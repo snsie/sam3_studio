@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import gc
+from collections import OrderedDict
 from contextlib import nullcontext
 from dataclasses import dataclass
 from io import BytesIO
@@ -72,7 +73,9 @@ class SAM3ModelRuntime:
         self._model: Any | None = None
         self._processor: Any | None = None
         self._device: str | None = None
-        self._session_states: dict[str, CachedSessionState] = {}
+        # Ordered most-recently-used last so the cache can be bounded; see
+        # _evict_overflowing_session_states.
+        self._session_states: OrderedDict[str, CachedSessionState] = OrderedDict()
 
     def preload_model(self) -> None:
         self._ensure_model_loaded()
@@ -151,6 +154,7 @@ class SAM3ModelRuntime:
             cached_state is not None
             and cached_state.cache_version == session.cache_version
         ):
+            self._session_states.move_to_end(session.session_id)
             return cached_state.base_state
 
         if self._processor is None:
@@ -164,8 +168,24 @@ class SAM3ModelRuntime:
             cache_version=cache_version,
             base_state=base_state,
         )
+        self._session_states.move_to_end(session.session_id)
+        self._evict_overflowing_session_states()
         self._sessions.mark_cache_ready(session.session_id, cache_version)
         return base_state
+
+    def _evict_overflowing_session_states(self) -> None:
+        """Drops the least-recently-used cached embeddings so VRAM stays bounded."""
+        limit = self._settings.sam3_max_cached_sessions
+        if limit <= 0:
+            return
+
+        evicted = False
+        while len(self._session_states) > limit:
+            self._session_states.popitem(last=False)
+            evicted = True
+
+        if evicted:
+            release_cuda_cache()
 
     def _run_interactive_segmentation(
         self,

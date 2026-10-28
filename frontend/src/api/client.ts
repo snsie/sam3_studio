@@ -55,20 +55,41 @@ async function fetchWithTimeout(
   timeoutMs: number,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const externalSignal = init.signal;
+  let timedOut = false;
+
+  const handleExternalAbort = () => {
+    controller.abort(externalSignal?.reason);
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort(externalSignal.reason);
+    } else {
+      externalSignal.addEventListener("abort", handleExternalAbort, { once: true });
+    }
+  }
+
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
 
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new ApiError(
-        "Segmentation request timed out while waiting for an available model.",
-        504,
-      );
+      if (timedOut) {
+        throw new ApiError(
+          "Segmentation request timed out while waiting for an available model.",
+          504,
+        );
+      }
     }
     throw error;
   } finally {
     window.clearTimeout(timeoutId);
+    externalSignal?.removeEventListener("abort", handleExternalAbort);
   }
 }
 
@@ -99,6 +120,7 @@ export async function loadSampleImage(filename: string): Promise<UploadResponse>
 
 export async function createSegmentationJob(
   payload: SegmentationRequest,
+  signal?: AbortSignal,
 ): Promise<JobStatusResponse> {
   const response = await fetchWithTimeout(`${API_BASE}/segment/jobs`, {
     method: "POST",
@@ -106,6 +128,7 @@ export async function createSegmentationJob(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
+    signal,
   }, SEGMENTATION_TIMEOUT_MS);
 
   return parseResponse<JobStatusResponse>(response);
@@ -140,11 +163,13 @@ export async function listChallengeImages(
 export async function loadChallengeImage(
   challengeId: ChallengeId,
   imageId: string,
+  signal?: AbortSignal,
 ): Promise<UploadResponse> {
   const response = await fetch(
     `${API_BASE}/challenges/${challengeId}/images/${encodeURIComponent(imageId)}/load`,
     {
       method: "POST",
+      signal,
     },
   );
   return parseResponse<UploadResponse>(response);

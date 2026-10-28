@@ -17,24 +17,24 @@ const DATASET_BRIEFS: Record<
   }
 > = {
   "single-class": {
-    headline: "Fast foreground segmentation warmup",
+    headline: "BBBC038 nuclei images from the 2018 Data Science Bowl",
     overview:
-      "This lane focuses on fast, confident coverage. Treat each microscopy tile as one foreground-vs-background decision and aim for smooth, complete object boundaries.",
+      "This track uses Broad Bioimage Benchmark Collection BBBC038 images: a deliberately diverse set of nuclei microscopy samples spanning different organisms, stains, imaging conditions, and tissue contexts.",
     facts: [
-      "Imagery: bright pathology crops with a single dominant target family.",
-      "Annotation goal: one clean binary mask per image, optimized for speed.",
-      "Workshop note: most examples were curated to reward broad coverage over tiny edge corrections.",
+      "Source: Broad Bioimage Benchmark Collection BBBC038, released for the Kaggle 2018 Data Science Bowl nuclei segmentation task.",
+      "Original annotations: one non-overlapping mask per nucleus in each training image.",
+      "Workshop adaptation: submit one combined foreground mask that covers all nuclei in the image.",
     ],
     buttonLabel: "Enter Single-Class Challenge",
   },
   "multi-class": {
-    headline: "Dense instance labeling sprint",
+    headline: "CoNIC colon nuclei segmentation and classification patches",
     overview:
-      "This lane is designed for crowded scenes. Split nearby structures into separate IDs and use the manual brush to keep overlapping objects visually distinct.",
+      "This track uses CoNIC data: 256x256 colon histology patches created for nuclei identification, segmentation, classification, and counting in crowded tissue regions.",
     facts: [
-      "Imagery: high-density cell fields with frequent touching structures.",
-      "Annotation goal: store multiple mask IDs per frame and keep identities stable.",
-      "Workshop note: the scoring rubric favors consistent instance separation more than raw mask count.",
+      "Source: Tissue Image Analytics CoNIC challenge for colon nuclei analysis.",
+      "Original labels combine instance segmentation with six cell classes: neutrophil, epithelial, lymphocyte, plasma, eosinophil, and connective.",
+      "Workshop adaptation: annotate the provided class regions as separate mask targets rather than full panoptic instances.",
     ],
     buttonLabel: "Enter Multi-Class Challenge",
   },
@@ -78,7 +78,7 @@ export function ChallengeSelector({
               </div>
 
               <div className="challenge-card-footer">
-                <p className="challenge-card-footnote">{challenge.description}</p>
+                {/* <p className="challenge-card-footnote">{challenge.description}</p> */}
                 <button
                   type="button"
                   className="primary-button challenge-card-button"

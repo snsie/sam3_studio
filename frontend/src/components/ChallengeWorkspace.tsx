@@ -8,6 +8,7 @@ import {
 } from "../api/client";
 import type {
   BrushMode,
+  BrushStrokeSegment,
   ChallengeExample,
   ChallengeId,
   ChallengeImageItem,
@@ -30,11 +31,11 @@ import {
   normalizeMaskLayerColors,
   recolorMaskCandidates,
   replaceMaskLayerData,
+  resizeMaskData,
   serializeMaskToDataUrl,
-  updateMaskWithBrush,
+  updateMaskWithBrushStroke,
 } from "../utils/challengeMasks";
 import { AnnotationCanvas } from "./AnnotationCanvas";
-import { BrushControls } from "./BrushControls";
 import { ExamplesModal } from "./ExamplesModal";
 import { ImageListSidebar } from "./ImageListSidebar";
 import { MaskIdPanel } from "./MaskIdPanel";
@@ -175,6 +176,11 @@ function mergeMaskData(
 ) {
   const merged = new Uint8ClampedArray(width * height);
   masks.forEach((mask) => {
+    // A mask laid out for a different pixel grid cannot be indexed with this width:
+    // doing so shears the mask across rows instead of failing, so drop it instead.
+    if (mask.length !== merged.length) {
+      return;
+    }
     for (let index = 0; index < merged.length; index += 1) {
       if (mask[index] > 0) {
         merged[index] = 255;
@@ -182,6 +188,38 @@ function mergeMaskData(
     }
   });
   return merged;
+}
+
+async function mergeMaskCandidates(
+  candidates: MaskCandidate[],
+  width: number,
+  height: number,
+) {
+  const decodedMasks = await Promise.all(
+    candidates.map((candidate) => candidateMaskToMaskData(candidate, width, height)),
+  );
+  return mergeMaskData(decodedMasks, width, height);
+}
+
+function resizeImageMaskState(
+  state: ChallengeImageMaskState,
+  width: number,
+  height: number,
+): ChallengeImageMaskState {
+  if (state.width === width && state.height === height) {
+    return state;
+  }
+  return {
+    ...state,
+    width,
+    height,
+    layers: state.layers.map((layer) =>
+      replaceMaskLayerData(
+        layer,
+        resizeMaskData(layer.data, state.width, state.height, width, height),
+      ),
+    ),
+  };
 }
 
 function applyStoredMasks(
@@ -197,7 +235,13 @@ function applyStoredMasks(
     return current;
   }
 
-  const mergedMask = mergeMaskData(decodedMasks, current.width, current.height);
+  const activeLayer =
+    current.layers.find((layer) => layer.mask_id === activeMaskId) ?? null;
+  const mergedMask = mergeMaskData(
+    activeLayer ? [activeLayer.data, ...decodedMasks] : decodedMasks,
+    current.width,
+    current.height,
+  );
 
   return {
     ...current,
@@ -216,6 +260,11 @@ interface MaskDraftState {
 
 const EMPTY_MASK_DRAFTS: Record<string, MaskDraftState> = {};
 
+interface ImageSessionState {
+  imageId: string;
+  upload: UploadResponse;
+}
+
 export function ChallengeWorkspace({
   challenge,
   images,
@@ -231,10 +280,10 @@ export function ChallengeWorkspace({
   onScoreResultChange,
   onUpdateImageState,
 }: ChallengeWorkspaceProps) {
-  const [session, setSession] = useState<UploadResponse | null>(null);
+  const [sessionState, setSessionState] = useState<ImageSessionState | null>(null);
   const [interactionMode, setInteractionMode] = useState<InteractionMode>("positive_point");
   const [brushMode, setBrushMode] = useState<BrushMode>("off");
-  const [brushRadius, setBrushRadius] = useState(12);
+  const [brushRadius, setBrushRadius] = useState(6);
   const [textPrompt, setTextPrompt] = useState("");
   const [points, setPoints] = useState<PromptPoint[]>([]);
   const [boxes, setBoxes] = useState<PromptBox[]>([]);
@@ -254,8 +303,21 @@ export function ChallengeWorkspace({
   const [maskDraftsById, setMaskDraftsById] = useState<Record<string, MaskDraftState>>({});
   const draftResultScopeRef = useRef<string | null>(null);
   const draftMaskScopeRef = useRef<string | null>(null);
+  const loadImageAbortRef = useRef<AbortController | null>(null);
+  const segmentationAbortRef = useRef<AbortController | null>(null);
+  const segmentationRequestSeqRef = useRef(0);
+  const currentImageIdRef = useRef<string | null>(null);
+  const currentSessionIdRef = useRef<string | null>(null);
 
   const currentImage = images[selectedImageIndex] ?? null;
+  // Sessions are loaded asynchronously, so on the render that switches images the
+  // previous image's session is still in state. Anything derived from a session -
+  // above all the mask buffer dimensions - must never read the wrong image's session,
+  // so scope it to the image it was actually loaded for.
+  const session =
+    sessionState && sessionState.imageId === currentImage?.image_id
+      ? sessionState.upload
+      : null;
   const currentImageDrafts = useMemo(
     () => (draftImageId === currentImage?.image_id ? maskDraftsById : EMPTY_MASK_DRAFTS),
     [draftImageId, currentImage?.image_id, maskDraftsById],
@@ -281,6 +343,14 @@ export function ChallengeWorkspace({
     setMaskDraftsById({});
     setDisplayCandidates([]);
   }, [currentImage?.image_id]);
+
+  useEffect(() => {
+    currentImageIdRef.current = currentImage?.image_id ?? null;
+  }, [currentImage?.image_id]);
+
+  useEffect(() => {
+    currentSessionIdRef.current = session?.session_id ?? null;
+  }, [session?.session_id]);
 
   const visibleCandidates = useMemo(() => {
     if (!deferredResult || deferredResult.candidates.length === 0) {
@@ -382,21 +452,52 @@ export function ChallengeWorkspace({
 
   useEffect(() => {
     if (!currentImage) {
-      setSession(null);
+      loadImageAbortRef.current?.abort();
+      loadImageAbortRef.current = null;
+      segmentationRequestSeqRef.current += 1;
+      segmentationAbortRef.current?.abort();
+      segmentationAbortRef.current = null;
+      setSessionState(null);
+      setJob(null);
+      setResult(null);
+      setSelectedCandidateId(null);
+      setDisplayCandidates([]);
+      setIsSubmitting(false);
       return;
     }
 
     let isCurrent = true;
+    const controller = new AbortController();
+    loadImageAbortRef.current?.abort();
+    loadImageAbortRef.current = controller;
+    segmentationRequestSeqRef.current += 1;
+    segmentationAbortRef.current?.abort();
+    segmentationAbortRef.current = null;
+
+    setSessionState(null);
+    setPoints([]);
+    setBoxes([]);
+    setJob(null);
+    setResult(null);
+    setSelectedCandidateId(null);
+    setTextPrompt("");
+    setDisplayCandidates([]);
+    setIsSubmitting(false);
+
     const loadImage = async () => {
       try {
         setIsLoadingImage(true);
         setErrorMessage(null);
         setCompletionMessage(null);
-        const uploaded = await loadChallengeImage(challenge.challenge_id, currentImage.image_id);
+        const uploaded = await loadChallengeImage(
+          challenge.challenge_id,
+          currentImage.image_id,
+          controller.signal,
+        );
         if (!isCurrent) {
           return;
         }
-        setSession(uploaded);
+        setSessionState({ imageId: currentImage.image_id, upload: uploaded });
         setPoints([]);
         setBoxes([]);
         setJob(null);
@@ -407,11 +508,17 @@ export function ChallengeWorkspace({
         if (!isCurrent) {
           return;
         }
-        setSession(null);
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        setSessionState(null);
         setErrorMessage(error instanceof Error ? error.message : "Failed to load challenge image.");
       } finally {
         if (isCurrent) {
           setIsLoadingImage(false);
+          if (loadImageAbortRef.current === controller) {
+            loadImageAbortRef.current = null;
+          }
         }
       }
     };
@@ -419,8 +526,17 @@ export function ChallengeWorkspace({
     void loadImage();
     return () => {
       isCurrent = false;
+      controller.abort();
+      if (loadImageAbortRef.current === controller) {
+        loadImageAbortRef.current = null;
+      }
     };
   }, [challenge.challenge_id, currentImage]);
+
+  useEffect(() => () => {
+    loadImageAbortRef.current?.abort();
+    segmentationAbortRef.current?.abort();
+  }, []);
 
   const currentImageState = useMemo(() => {
     if (!currentImage || !session) {
@@ -433,11 +549,23 @@ export function ChallengeWorkspace({
   }, [challenge.challenge_id, currentImage, imageStates, session]);
 
   useEffect(() => {
-    if (!currentImage || !session || imageStates[currentImage.image_id]) {
+    if (!currentImage || !session) {
       return;
     }
-    onUpdateImageState(currentImage.image_id, () =>
-      createDefaultImageState(challenge.challenge_id, currentImage.image_id, session.width, session.height),
+    const existingState = imageStates[currentImage.image_id];
+    if (!existingState) {
+      onUpdateImageState(currentImage.image_id, () =>
+        createDefaultImageState(challenge.challenge_id, currentImage.image_id, session.width, session.height),
+      );
+      return;
+    }
+    // Self-heal any state that was sized against a different image so mask buffers
+    // always match the pixel grid the canvas and the scorer use.
+    if (existingState.width === session.width && existingState.height === session.height) {
+      return;
+    }
+    onUpdateImageState(currentImage.image_id, (current) =>
+      resizeImageMaskState(current ?? existingState, session.width, session.height),
     );
   }, [challenge.challenge_id, currentImage, imageStates, onUpdateImageState, session]);
 
@@ -471,10 +599,6 @@ export function ChallengeWorkspace({
       return [];
     }
 
-    if (challenge.challenge_id !== "multi-class") {
-      return currentImageState.layers;
-    }
-
     const mergedLayers = currentImageState.layers.map((layer) => {
       const draftMask = currentImageDrafts[layer.mask_id]?.mergedMaskData;
       if (!draftMask) {
@@ -497,8 +621,11 @@ export function ChallengeWorkspace({
     if (brushMode !== "off") {
       return [];
     }
+    if (activeDraftMask) {
+      return [];
+    }
     return visibleMasks;
-  }, [brushMode, challenge.challenge_id, visibleMasks]);
+  }, [activeDraftMask, brushMode, challenge.challenge_id, visibleMasks]);
 
   useEffect(() => {
     if (challenge.challenge_id !== "multi-class") {
@@ -521,7 +648,6 @@ export function ChallengeWorkspace({
 
   useEffect(() => {
     if (
-      challenge.challenge_id !== "multi-class" ||
       draftImageId !== currentImage?.image_id ||
       !currentImageState?.active_mask_id ||
       !activeDraftScopeKey
@@ -646,7 +772,6 @@ export function ChallengeWorkspace({
 
   useEffect(() => {
     if (
-      challenge.challenge_id !== "multi-class" ||
       draftImageId !== currentImage?.image_id ||
       !currentImageState?.active_mask_id ||
       !activeDraftScopeKey
@@ -670,21 +795,43 @@ export function ChallengeWorkspace({
     const cacheDraftMask = async () => {
       try {
         const decodedMasks = await Promise.all(
-          visibleMasks.map((candidate) => candidateMaskToMaskData(candidate)),
+          visibleMasks.map((candidate) =>
+            candidateMaskToMaskData(
+              candidate,
+              currentImageState.width,
+              currentImageState.height,
+            ),
+          ),
         );
         if (!isCurrent) {
           return;
         }
-        const mergedMask = mergeMaskData(decodedMasks, currentImageState.width, currentImageState.height);
-        setMaskDraftsById((current) => ({
-          ...current,
-          [activeMaskId]: {
-            result,
-            displayCandidates: current[activeMaskId]?.displayCandidates ?? displayCandidates,
-            selectedCandidateId,
-            mergedMaskData: mergedMask,
-          },
-        }));
+        setMaskDraftsById((current) => {
+          const previous = current[activeMaskId];
+          const activeLayerData =
+            currentImageState.layers.find((layer) => layer.mask_id === activeMaskId)?.data ?? null;
+          const mergedMask = mergeMaskData(
+            [
+              ...(activeLayerData ? [activeLayerData] : []),
+              ...(previous?.mergedMaskData && previous.result !== result
+                ? [previous.mergedMaskData]
+                : []),
+              ...decodedMasks,
+            ],
+            currentImageState.width,
+            currentImageState.height,
+          );
+
+          return {
+            ...current,
+            [activeMaskId]: {
+              result,
+              displayCandidates: previous?.displayCandidates ?? displayCandidates,
+              selectedCandidateId,
+              mergedMaskData: mergedMask,
+            },
+          };
+        });
       } catch {
         return;
       }
@@ -695,7 +842,6 @@ export function ChallengeWorkspace({
       isCurrent = false;
     };
   }, [
-    challenge.challenge_id,
     currentImage?.image_id,
     currentImageState?.active_mask_id,
     currentImageState?.height,
@@ -709,13 +855,39 @@ export function ChallengeWorkspace({
   ]);
 
   const handleSubmit = async (request: SegmentationRequest) => {
+    const submitImageId = currentImageIdRef.current;
+    const submitSessionId = request.session_id;
+    const submitSequence = segmentationRequestSeqRef.current + 1;
+    segmentationRequestSeqRef.current = submitSequence;
+
+    const controller = new AbortController();
+    segmentationAbortRef.current?.abort();
+    segmentationAbortRef.current = controller;
+
     try {
       setErrorMessage(null);
       setIsSubmitting(true);
       setJob(createPendingJobStatus(request.session_id));
 
-      const completed = await createSegmentationJob(request);
+      const completed = await createSegmentationJob(request, controller.signal);
+      const isLatestRequest = segmentationRequestSeqRef.current === submitSequence;
+      const isCurrentScope =
+        currentImageIdRef.current === submitImageId &&
+        currentSessionIdRef.current === submitSessionId;
+
+      if (!isLatestRequest || !isCurrentScope) {
+        return;
+      }
+
       startTransition(() => {
+        if (
+          segmentationRequestSeqRef.current !== submitSequence ||
+          currentImageIdRef.current !== submitImageId ||
+          currentSessionIdRef.current !== submitSessionId
+        ) {
+          return;
+        }
+
         setJob(completed);
         if (completed.status === "complete" && completed.result) {
           setResult(completed.result);
@@ -730,6 +902,22 @@ export function ChallengeWorkspace({
         setErrorMessage("Segmentation finished without a usable result.");
       });
     } catch (error) {
+      const isLatestRequest = segmentationRequestSeqRef.current === submitSequence;
+      const isCurrentScope =
+        currentImageIdRef.current === submitImageId &&
+        currentSessionIdRef.current === submitSessionId;
+
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError"
+      ) {
+        return;
+      }
+
+      if (!isLatestRequest || !isCurrentScope) {
+        return;
+      }
+
       const message = error instanceof Error ? error.message : "Segmentation request failed.";
       setJob((current) =>
         current
@@ -745,7 +933,12 @@ export function ChallengeWorkspace({
       );
       setErrorMessage(message);
     } finally {
-      setIsSubmitting(false);
+      if (segmentationRequestSeqRef.current === submitSequence) {
+        setIsSubmitting(false);
+      }
+      if (segmentationAbortRef.current === controller) {
+        segmentationAbortRef.current = null;
+      }
     }
   };
 
@@ -825,12 +1018,11 @@ export function ChallengeWorkspace({
     }
   };
 
-  const handleBrushStroke = (x: number, y: number, draw: boolean) => {
+  const handleBrushStroke = (stroke: BrushStrokeSegment) => {
     if (!activeLayer || !currentImageState) {
       return;
     }
-    const shouldCommitCurrentDraft =
-      challenge.challenge_id === "multi-class" && activeDraftMask !== null;
+    const shouldCommitCurrentDraft = activeDraftMask !== null;
 
     updateCurrentImageState((current) => ({
       ...current,
@@ -838,16 +1030,18 @@ export function ChallengeWorkspace({
         layer.mask_id === activeLayer.mask_id
           ? replaceMaskLayerData(
             layer,
-            updateMaskWithBrush(
+            updateMaskWithBrushStroke(
               shouldCommitCurrentDraft && activeDraftMask
                 ? mergeMaskData([layer.data, activeDraftMask], current.width, current.height)
                 : layer.data,
               current.width,
               current.height,
-              x,
-              y,
+              stroke.fromX,
+              stroke.fromY,
+              stroke.toX,
+              stroke.toY,
               brushRadius,
-              draw,
+              stroke.draw,
             ),
           )
           : layer,
@@ -941,9 +1135,19 @@ export function ChallengeWorkspace({
       setCompletionMessage(null);
       setStoreToast(null);
 
+      const nextDraftMask =
+        activeDraftMask ??
+        (visibleMasks.length > 0
+          ? await mergeMaskCandidates(
+            visibleMasks,
+            currentImageState.width,
+            currentImageState.height,
+          )
+          : null);
+
       const storedAt = new Date().toISOString();
       updateCurrentImageState((current) => {
-        const nextState = activeDraftMask ? applyStoredMasks(current, [activeDraftMask]) : current;
+        const nextState = nextDraftMask ? applyStoredMasks(current, [nextDraftMask]) : current;
         return {
           ...nextState,
           stored: true,
@@ -1025,13 +1229,6 @@ export function ChallengeWorkspace({
             onChange={setTextPrompt}
             onSubmit={runCurrentPrompts}
           />
-          <BrushControls
-            brushMode={brushMode}
-            brushRadius={brushRadius}
-            disabled={!session || isBusy || !activeLayer}
-            onBrushModeChange={setBrushMode}
-            onBrushRadiusChange={setBrushRadius}
-          />
           <ImageListSidebar
             images={images}
             activeImageId={currentImage?.image_id ?? null}
@@ -1054,7 +1251,12 @@ export function ChallengeWorkspace({
               disabled={isBusy || !session}
               mode={interactionMode}
               availableModes={CHALLENGE_PROMPT_MODES}
+              brushMode={brushMode}
+              brushRadius={brushRadius}
+              brushDisabled={!session || isBusy || !activeLayer}
               onModeChange={handleInteractionModeChange}
+              onBrushModeChange={setBrushMode}
+              onBrushRadiusChange={setBrushRadius}
             />
           </div>
           <AnnotationCanvas
@@ -1062,6 +1264,31 @@ export function ChallengeWorkspace({
             groundTruthOverlayUrl={session?.ground_truth_overlay_data_url ?? null}
             imageWidth={session?.width ?? currentImageState?.width ?? 0}
             imageHeight={session?.height ?? currentImageState?.height ?? 0}
+            headerActions={(
+              <div className="annotation-canvas-nav">
+                <button
+                  type="button"
+                  className="secondary-button compact-button"
+                  disabled={selectedImageIndex === 0}
+                  onClick={() => onSelectedImageIndexChange(Math.max(0, selectedImageIndex - 1))}
+                >
+                  Previous
+                </button>
+                <span className="field-note annotation-canvas-nav-status">
+                  {currentImage ? `${currentImage.index} / ${images.length}` : "No image selected"}
+                </span>
+                <button
+                  type="button"
+                  className="secondary-button compact-button"
+                  disabled={selectedImageIndex >= images.length - 1}
+                  onClick={() =>
+                    onSelectedImageIndexChange(Math.min(images.length - 1, selectedImageIndex + 1))
+                  }
+                >
+                  Next
+                </button>
+              </div>
+            )}
             interactionMode={interactionMode}
             brushMode={brushMode}
             brushRadius={brushRadius}
@@ -1089,40 +1316,14 @@ export function ChallengeWorkspace({
             }}
             onBrushStroke={handleBrushStroke}
           />
-          <div className="challenge-navigation-row panel-block">
-            <button
-              type="button"
-              className="secondary-button compact-button"
-              disabled={selectedImageIndex === 0}
-              onClick={() => onSelectedImageIndexChange(Math.max(0, selectedImageIndex - 1))}
-            >
-              Previous
-            </button>
-            <span className="field-note">
-              {currentImage ? `${currentImage.index} / ${images.length}` : "No image selected"}
-            </span>
-            <button
-              type="button"
-              className="secondary-button compact-button"
-              disabled={selectedImageIndex >= images.length - 1}
-              onClick={() => onSelectedImageIndexChange(Math.min(images.length - 1, selectedImageIndex + 1))}
-            >
-              Next
-            </button>
-          </div>
           {completionMessage ? <div className="panel-block completion-banner">{completionMessage}</div> : null}
         </div>
 
         <div className="challenge-right-column">
           <div className="panel-block challenge-actions-card">
             <div className="section-heading compact-heading">
-              <span className="section-kicker">SAM3</span>
+              {/* <span className="section-kicker">SAM3</span> */}
               <h2>Prompt Actions</h2>
-            </div>
-            <div className="challenge-header-actions">
-              <button type="button" className="secondary-button compact-button" onClick={() => setShowExamples(true)}>
-                Display Examples
-              </button>
             </div>
             <div className="prompt-summary">
               <span>{points.length} points</span>

@@ -18,8 +18,6 @@ function formatPercent(value: number) {
 
 export function ScorePanel({
   userName,
-  storedImageCount,
-  datasetSize,
   disabled,
   isSubmitting,
   errorMessage,
@@ -30,12 +28,12 @@ export function ScorePanel({
   return (
     <section className="panel-block score-panel-card">
       <div className="section-heading">
-        <span className="section-kicker">Scoring</span>
+        {/* <span className="section-kicker">Scoring</span> */}
         <h2>Score Dataset</h2>
       </div>
-      <label className="field-label" htmlFor="challenge-user-name">
+      {/* <label className="field-label" htmlFor="challenge-user-name">
         Your name
-      </label>
+      </label> */}
       <div className="score-panel-row">
         <input
           id="challenge-user-name"
@@ -54,7 +52,7 @@ export function ScorePanel({
           {isSubmitting ? "Scoring..." : "Score Dataset"}
         </button>
       </div>
-      <p className="field-note">{`${storedImageCount} stored / ${datasetSize} total images`}</p>
+      {/* <p className="field-note">{`${storedImageCount} stored / ${datasetSize} total images`}</p> */}
       {errorMessage ? <div className="error-banner inline-error">{errorMessage}</div> : null}
       {result ? (
         <div className="score-summary-card">

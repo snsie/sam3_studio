@@ -18,6 +18,15 @@ export type ChallengeId = "single-class" | "multi-class";
 
 export type BrushMode = "off" | "draw" | "erase";
 
+/** One brush segment in image pixel space, from the previous pointer sample to the current one. */
+export interface BrushStrokeSegment {
+  fromX: number;
+  fromY: number;
+  toX: number;
+  toY: number;
+  draw: boolean;
+}
+
 export type PointLabel = "positive" | "negative";
 
 export type PromptPointSource = "click" | "positive_point" | "negative_point";

@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import type {
   BrushMode,
+  BrushStrokeSegment,
   EditableMaskLayer,
   InteractionMode,
   MaskCandidate,
@@ -15,6 +17,7 @@ interface AnnotationCanvasProps {
   groundTruthOverlayUrl: string | null;
   imageWidth: number;
   imageHeight: number;
+  headerActions?: ReactNode;
   interactionMode: InteractionMode;
   brushMode: BrushMode;
   brushRadius: number;
@@ -28,7 +31,7 @@ interface AnnotationCanvasProps {
   onRemovePoint: (pointId: string) => void;
   onAddBox: (box: PromptBox) => void;
   onRemoveBox: (boxId: string) => void;
-  onBrushStroke: (x: number, y: number, draw: boolean) => void;
+  onBrushStroke: (stroke: BrushStrokeSegment) => void;
 }
 
 interface ImagePoint {
@@ -125,6 +128,7 @@ export function AnnotationCanvas({
   groundTruthOverlayUrl,
   imageWidth,
   imageHeight,
+  headerActions,
   interactionMode,
   brushMode,
   brushRadius,
@@ -144,6 +148,7 @@ export function AnnotationCanvas({
   const editableCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStartRef = useRef<{ clientX: number; clientY: number } | null>(null);
   const isPaintingRef = useRef(false);
+  const lastPaintPointRef = useRef<ImagePoint | null>(null);
   const [view, setView] = useState<ViewState>({ x: 0, y: 0, scale: 1 });
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [draftBox, setDraftBox] = useState<BoxDraftState | null>(null);
@@ -164,6 +169,7 @@ export function AnnotationCanvas({
     setCursorPoint(null);
     pointerStartRef.current = null;
     isPaintingRef.current = false;
+    lastPaintPointRef.current = null;
   }, [imageHeight, imageUrl, imageWidth]);
 
   useEffect(() => {
@@ -339,7 +345,14 @@ export function AnnotationCanvas({
     pointerStartRef.current = { clientX: event.clientX, clientY: event.clientY };
     if (brushMode !== "off") {
       isPaintingRef.current = true;
-      onBrushStroke(point.x, point.y, brushMode === "draw");
+      lastPaintPointRef.current = point;
+      onBrushStroke({
+        fromX: point.x,
+        fromY: point.y,
+        toX: point.x,
+        toY: point.y,
+        draw: brushMode === "draw",
+      });
       return;
     }
     if (interactionMode === "box") {
@@ -374,7 +387,15 @@ export function AnnotationCanvas({
     setCursorPoint(point);
 
     if (brushMode !== "off" && isPaintingRef.current) {
-      onBrushStroke(point.x, point.y, brushMode === "draw");
+      const previousPoint = lastPaintPointRef.current ?? point;
+      lastPaintPointRef.current = point;
+      onBrushStroke({
+        fromX: previousPoint.x,
+        fromY: previousPoint.y,
+        toX: point.x,
+        toY: point.y,
+        draw: brushMode === "draw",
+      });
       return;
     }
     if (dragState?.kind === "box" && draftBox) {
@@ -413,6 +434,7 @@ export function AnnotationCanvas({
 
     if (brushMode !== "off") {
       isPaintingRef.current = false;
+      lastPaintPointRef.current = null;
       pointerStartRef.current = null;
       return;
     }
@@ -465,6 +487,7 @@ export function AnnotationCanvas({
     }
     setCursorPoint(null);
     isPaintingRef.current = false;
+    lastPaintPointRef.current = null;
   };
 
   const handlePointerCancel = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -475,6 +498,7 @@ export function AnnotationCanvas({
 
     pointerStartRef.current = null;
     isPaintingRef.current = false;
+    lastPaintPointRef.current = null;
     setDragState(null);
     setDraftBox(null);
     setCursorPoint(null);
@@ -521,9 +545,12 @@ export function AnnotationCanvas({
 
   return (
     <section className="annotation-canvas-shell panel-block">
-      <div className="section-heading compact-heading">
-        <span className="section-kicker">Canvas</span>
-        <h2>Annotation Canvas</h2>
+      <div className="section-heading compact-heading annotation-canvas-heading">
+        <div className="annotation-canvas-title">
+          {/* <span className="section-kicker">Canvas</span> */}
+          <h2>Annotation Canvas</h2>
+        </div>
+        {headerActions ? <div className="annotation-canvas-header-actions">{headerActions}</div> : null}
       </div>
       {!hasImage ? (
         <div className="viewer-empty-state challenge-empty-state">
@@ -534,7 +561,6 @@ export function AnnotationCanvas({
         <div
           ref={stageRef}
           className={`annotation-stage${disabled ? " is-disabled" : ""}`}
-          style={{ aspectRatio: `${imageWidth} / ${imageHeight}` }}
           onMouseDown={handleCanvasMouseDown}
           onWheel={handleWheel}
           onPointerDown={handlePointerDown}

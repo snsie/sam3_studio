@@ -60,16 +60,15 @@ export function replaceMaskLayerData(
   };
 }
 
-export function updateMaskWithBrush(
-  data: Uint8ClampedArray,
+function stampBrushCircle(
+  target: Uint8ClampedArray,
   width: number,
   height: number,
   centerX: number,
   centerY: number,
   radius: number,
   draw: boolean,
-): Uint8ClampedArray {
-  const next = cloneMaskData(data);
+) {
   const minX = clamp(Math.floor(centerX - radius), 0, width - 1);
   const maxX = clamp(Math.ceil(centerX + radius), 0, width - 1);
   const minY = clamp(Math.floor(centerY - radius), 0, height - 1);
@@ -83,7 +82,94 @@ export function updateMaskWithBrush(
       if (deltaX * deltaX + deltaY * deltaY > radiusSquared) {
         continue;
       }
-      next[y * width + x] = draw ? 255 : 0;
+      target[y * width + x] = draw ? 255 : 0;
+    }
+  }
+}
+
+export function updateMaskWithBrush(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  centerX: number,
+  centerY: number,
+  radius: number,
+  draw: boolean,
+): Uint8ClampedArray {
+  const next = cloneMaskData(data);
+  stampBrushCircle(next, width, height, centerX, centerY, radius, draw);
+  return next;
+}
+
+/**
+ * Stamps the brush along the segment between two pointer samples. Pointer events
+ * are coarse relative to image pixels, so stamping only the latest sample leaves
+ * gaps in the stroke whenever the cursor moves faster than one brush width per event.
+ */
+export function updateMaskWithBrushStroke(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number,
+  radius: number,
+  draw: boolean,
+): Uint8ClampedArray {
+  const next = cloneMaskData(data);
+  const distance = Math.hypot(toX - fromX, toY - fromY);
+  const step = Math.max(radius / 2, 0.5);
+  const stampCount = Math.min(Math.ceil(distance / step), 4096);
+
+  for (let index = 0; index <= stampCount; index += 1) {
+    const ratio = stampCount === 0 ? 1 : index / stampCount;
+    stampBrushCircle(
+      next,
+      width,
+      height,
+      fromX + (toX - fromX) * ratio,
+      fromY + (toY - fromY) * ratio,
+      radius,
+      draw,
+    );
+  }
+
+  return next;
+}
+
+/**
+ * Nearest-neighbour remap of a mask buffer onto a different pixel grid. Mask data is
+ * a flat array, so reading it with a stride that does not match the width it was
+ * written with skews the mask instead of failing loudly - always remap first.
+ */
+export function resizeMaskData(
+  data: Uint8ClampedArray,
+  fromWidth: number,
+  fromHeight: number,
+  toWidth: number,
+  toHeight: number,
+): Uint8ClampedArray {
+  if (fromWidth === toWidth && fromHeight === toHeight) {
+    return cloneMaskData(data);
+  }
+
+  const next = createEmptyMaskData(toWidth, toHeight);
+  if (fromWidth <= 0 || fromHeight <= 0 || toWidth <= 0 || toHeight <= 0) {
+    return next;
+  }
+
+  for (let y = 0; y < toHeight; y += 1) {
+    const sourceY = Math.min(
+      fromHeight - 1,
+      Math.floor((y * fromHeight) / toHeight),
+    );
+    for (let x = 0; x < toWidth; x += 1) {
+      const sourceX = Math.min(
+        fromWidth - 1,
+        Math.floor((x * fromWidth) / toWidth),
+      );
+      next[y * toWidth + x] = data[sourceY * fromWidth + sourceX];
     }
   }
 
@@ -107,8 +193,14 @@ export function drawLayersToCanvas(
 ) {
   context.clearRect(0, 0, width, height);
   const imageData = context.createImageData(width, height);
+  const expectedLength = width * height;
 
   layers.forEach((layer) => {
+    // Drawing a layer whose buffer was sized for a different image would shear it
+    // across rows rather than error, so skip it until the layer is resized to match.
+    if (layer.data.length !== expectedLength) {
+      return;
+    }
     const [red, green, blue] = layer.color_rgb;
     const alpha = Math.round(opacity * 170);
     for (let index = 0; index < layer.data.length; index += 1) {
@@ -198,23 +290,33 @@ export async function recolorMaskCandidates(
   );
 }
 
+/**
+ * Decodes a SAM mask onto the caller's pixel grid. `targetWidth`/`targetHeight` must be
+ * the dimensions of the buffer the mask will be merged into: a mask decoded at the
+ * candidate's own size cannot be indexed with a different width without skewing it.
+ */
 export async function candidateMaskToMaskData(
   candidate: Pick<MaskCandidate, "image_data_url" | "width" | "height">,
+  targetWidth?: number,
+  targetHeight?: number,
 ) {
+  const width = targetWidth && targetWidth > 0 ? targetWidth : candidate.width;
+  const height = targetHeight && targetHeight > 0 ? targetHeight : candidate.height;
+
   const image = new Image();
   image.src = candidate.image_data_url;
   await image.decode();
 
   const canvas = document.createElement("canvas");
-  canvas.width = candidate.width;
-  canvas.height = candidate.height;
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) {
     throw new Error("Unable to decode SAM mask image.");
   }
-  context.drawImage(image, 0, 0, candidate.width, candidate.height);
-  const { data } = context.getImageData(0, 0, candidate.width, candidate.height);
-  const mask = createEmptyMaskData(candidate.width, candidate.height);
+  context.drawImage(image, 0, 0, width, height);
+  const { data } = context.getImageData(0, 0, width, height);
+  const mask = createEmptyMaskData(width, height);
   for (let pixelIndex = 0; pixelIndex < mask.length; pixelIndex += 1) {
     mask[pixelIndex] = data[pixelIndex * 4 + 3] > 0 ? 255 : 0;
   }

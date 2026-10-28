@@ -80,10 +80,6 @@ function promptsToRequest(
   };
 }
 
-function isAccumulatedPointMode(mode: InteractionMode) {
-  return mode === "positive_point" || mode === "negative_point";
-}
-
 function createPendingJobStatus(sessionId: string): JobStatusResponse {
   const now = new Date().toISOString();
   return {
@@ -156,15 +152,21 @@ export function SandboxPage({ onHeaderStateChange }: SandboxPageProps) {
     };
   }, []);
 
+  // useDeferredValue hands back the previous result while a new one commits, so on an image
+  // switch the old masks would be drawn - and CSS-stretched - over the new image. Only ever
+  // show masks that belong to the session currently loaded.
+  const activeResult =
+    deferredResult && deferredResult.session_id === session?.session_id ? deferredResult : null;
+
   const visibleCandidates = useMemo(() => {
-    if (!deferredResult || deferredResult.candidates.length === 0) {
+    if (!activeResult || activeResult.candidates.length === 0) {
       return [];
     }
 
-    return deferredResult.candidates.filter(
+    return activeResult.candidates.filter(
       (candidate) => typeof candidate.score === "number" && candidate.score > confidenceThreshold,
     );
-  }, [confidenceThreshold, deferredResult]);
+  }, [confidenceThreshold, activeResult]);
 
   useEffect(() => {
     if (selectedCandidateId === null) {
@@ -229,13 +231,15 @@ export function SandboxPage({ onHeaderStateChange }: SandboxPageProps) {
   }, [applyUploadedSession]);
 
   useEffect(() => {
-    if (hasAttemptedInitialSampleLoad.current || session || samples.length === 0) {
+    // isUploading matters here: a file dropped before the sample list resolves has no
+    // session yet, so without this guard the first sample would race it and win.
+    if (hasAttemptedInitialSampleLoad.current || session || isUploading || samples.length === 0) {
       return;
     }
 
     hasAttemptedInitialSampleLoad.current = true;
     void handleSampleSelect(samples[0]);
-  }, [handleSampleSelect, samples, session]);
+  }, [handleSampleSelect, isUploading, samples, session]);
 
   const handleSubmit = async (request: SegmentationRequest) => {
     try {
@@ -317,10 +321,8 @@ export function SandboxPage({ onHeaderStateChange }: SandboxPageProps) {
 
   const handleInteractionModeChange = (nextMode: InteractionMode) => {
     setInteractionMode(nextMode);
-    if (!isAccumulatedPointMode(nextMode)) {
-      return;
-    }
-
+    // A click-mode point is a one-shot prompt. Carrying it into any other mode makes the
+    // next run refine the previously clicked object instead of the new prompt.
     setPoints((current) => current.filter((point) => point.source !== "click"));
   };
 

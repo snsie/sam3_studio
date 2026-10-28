@@ -22,6 +22,11 @@ class QueueFullError(RuntimeError):
     pass
 
 
+# Finished jobs stay queryable via GET /jobs/{id}, but each one retains a full
+# SegmentationResult with base64 mask PNGs, so only keep a recent window of them.
+MAX_RETAINED_TERMINAL_JOBS = 64
+
+
 @dataclass(slots=True)
 class SegmentationJob:
     job_id: str
@@ -34,6 +39,7 @@ class SegmentationJob:
     updated_at: datetime = field(default_factory=utcnow)
     result: SegmentationResult | None = None
     error: str | None = None
+    abandoned: bool = False
 
     def to_response(self) -> JobStatusResponse:
         return JobStatusResponse(
@@ -108,6 +114,20 @@ class InferenceQueue:
             await asyncio.gather(*tuple(self._job_tasks), return_exceptions=True)
             self._job_tasks.clear()
 
+        # Cancelling a job task raises CancelledError, which _process does not catch, so
+        # its future would stay pending and every waiting client would block until its
+        # request timeout instead of learning that the server is going away.
+        while True:
+            try:
+                self._pending_jobs.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._pending_jobs.task_done()
+
+        for job in tuple(self._jobs.values()):
+            if not job.future.done():
+                self._set_failed(job, "The segmentation service is shutting down.")
+
     async def submit(self, payload: SegmentationRequest) -> SegmentationJob:
         if self._stopping:
             raise RuntimeError("The inference queue is shutting down.")
@@ -119,6 +139,7 @@ class InferenceQueue:
             future=loop.create_future(),
         )
         self._jobs[job.job_id] = job
+        self._prune_terminal_jobs()
 
         try:
             self._pending_jobs.put_nowait(job)
@@ -145,12 +166,34 @@ class InferenceQueue:
         try:
             return await asyncio.wait_for(asyncio.shield(job.future), timeout=timeout_seconds)
         except asyncio.TimeoutError:
+            # Nobody is left to receive this result. Flag it so a worker does not spend GPU
+            # time on it: the frontend aborts its request on every image switch, so queued
+            # work outlives the interest in it and would delay the user's live request.
+            job.abandoned = True
             logger.warning(
                 "Segmentation job %s exceeded the request timeout after %.1f seconds",
                 job.job_id,
                 timeout_seconds,
             )
             raise
+        except asyncio.CancelledError:
+            job.abandoned = True
+            logger.info(
+                "Segmentation job %s was abandoned by its caller before completing",
+                job.job_id,
+            )
+            raise
+
+    def _prune_terminal_jobs(self) -> None:
+        # dict preserves insertion order, so these are oldest-first.
+        terminal_job_ids = [
+            job_id
+            for job_id, job in self._jobs.items()
+            if job.status in (JobStatus.COMPLETE, JobStatus.FAILED)
+        ]
+        overflow = len(terminal_job_ids) - MAX_RETAINED_TERMINAL_JOBS
+        for job_id in terminal_job_ids[:overflow]:
+            self._jobs.pop(job_id, None)
 
     async def get(self, job_id: str) -> JobStatusResponse | None:
         job = self._jobs.get(job_id)
@@ -179,6 +222,15 @@ class InferenceQueue:
         progress_callback = self._make_progress_callback(job)
 
         try:
+            if job.abandoned:
+                logger.info(
+                    "Skipping abandoned segmentation job %s before it reached worker-%s",
+                    job.job_id,
+                    worker.worker_id,
+                )
+                self._set_failed(job, "The request was abandoned before it started.")
+                return
+
             logger.info("Starting segmentation job %s on worker-%s", job.job_id, worker.worker_id)
             result = await worker.run(job, progress_callback)
             self._set_complete(job, result)

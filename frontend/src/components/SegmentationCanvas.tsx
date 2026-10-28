@@ -137,7 +137,14 @@ export function SegmentationCanvas({
   }, []);
 
   const getImageCoordinates = useCallback(
-    (clientX: number, clientY: number): ImagePoint | null => {
+    (
+      clientX: number,
+      clientY: number,
+      // The stage is letterboxed whenever the image aspect differs from the container, so
+      // clamping every pointer position turns a click on the backdrop into an edge prompt.
+      // Point prompts reject those; a box drag clamps so it can be finished off-image.
+      { clampToImage = false }: { clampToImage?: boolean } = {},
+    ): ImagePoint | null => {
       const container = containerRef.current;
       if (!container || !imageWidth || !imageHeight) {
         return null;
@@ -147,9 +154,13 @@ export function SegmentationCanvas({
       const x = (clientX - rect.left - view.x) / view.scale;
       const y = (clientY - rect.top - view.y) / view.scale;
 
+      if (!clampToImage && (x < 0 || y < 0 || x >= imageWidth || y >= imageHeight)) {
+        return null;
+      }
+
       return {
-        x: clamp(x, 0, imageWidth),
-        y: clamp(y, 0, imageHeight),
+        x: clamp(x, 0, imageWidth - 1),
+        y: clamp(y, 0, imageHeight - 1),
       };
     },
     [imageHeight, imageWidth, view.scale, view.x, view.y],
@@ -249,7 +260,9 @@ export function SegmentationCanvas({
       return;
     }
 
-    const point = getImageCoordinates(event.clientX, event.clientY);
+    const point = getImageCoordinates(event.clientX, event.clientY, {
+      clampToImage: true,
+    });
     if (!point) {
       return;
     }
@@ -562,6 +575,8 @@ export function SegmentationCanvas({
                     transform: "translate(-50%, -50%)",
                     ...getMaskLabelStyles(mask.color_rgb),
                   }}
+                  onPointerDown={interceptCanvasPointerEvent}
+                  onPointerUp={interceptCanvasPointerEvent}
                   onClick={(event) => {
                     event.stopPropagation();
                     onSelectMask(mask.candidate_id);

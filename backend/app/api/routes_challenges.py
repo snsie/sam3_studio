@@ -131,7 +131,9 @@ def score_challenge_dataset(
     try:
         summary = scoring_service.score_submission(challenge_id, request)
         stored_summary = leaderboard_service.add_entry(summary)
-        return stored_summary
+        # The leaderboard round-trip reads back only persisted columns, so carry the
+        # scoring warnings through - the score panel renders them for the user.
+        return stored_summary.model_copy(update={"warnings": summary.warnings})
     except DuplicateSubmissionError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)

@@ -36,9 +36,11 @@ export function ResultsPanel({
   visibleCandidatesLabel = "above threshold",
   emptyThresholdMessage = "No masks are above the current confidence threshold.",
 }: ResultsPanelProps) {
-  const totalCandidates = result?.candidates.length ?? 0;
   const hasMask = visibleCandidates.length > 0;
   const displayedCandidates = listCandidates ?? result?.candidates ?? [];
+  // Count what is actually listed: callers may pass a pre-filtered listCandidates, and
+  // result is live state while the candidates can come from a deferred one.
+  const totalCandidates = displayedCandidates.length;
 
   const handleCandidateSelect = (candidate: MaskCandidate) => {
     const isAboveThreshold =
