@@ -7,6 +7,11 @@ import type {
   ChallengeSummary,
   JobStatusResponse,
   LeaderboardResponse,
+  NucleiImageListResponse,
+  NucleiImageMetricsResponse,
+  NucleiMetricsSummary,
+  NucleiModelKey,
+  NucleiPredictionResponse,
   SegmentationRequest,
   SessionResetResponse,
   UploadResponse,
@@ -206,6 +211,41 @@ export async function listLeaderboardEntries(
   const path = challengeId ? `${API_BASE}/leaderboard/${challengeId}` : `${API_BASE}/leaderboard`;
   const response = await fetch(path);
   return parseResponse<LeaderboardResponse>(response);
+}
+
+export async function listNucleiImages(): Promise<NucleiImageListResponse> {
+  const response = await fetch(`${API_BASE}/nuclei-demo/images`);
+  return parseResponse<NucleiImageListResponse>(response);
+}
+
+export async function getNucleiMetrics(): Promise<NucleiMetricsSummary> {
+  const response = await fetch(`${API_BASE}/nuclei-demo/metrics`);
+  return parseResponse<NucleiMetricsSummary>(response);
+}
+
+export async function getNucleiImageMetrics(imageId: string): Promise<NucleiImageMetricsResponse> {
+  const response = await fetch(`${API_BASE}/nuclei-demo/metrics/${encodeURIComponent(imageId)}`);
+  return parseResponse<NucleiImageMetricsResponse>(response);
+}
+
+export async function predictNuclei(
+  imageId: string,
+  modelKey: NucleiModelKey,
+  signal?: AbortSignal,
+): Promise<NucleiPredictionResponse> {
+  const response = await fetchWithTimeout(
+    `${API_BASE}/nuclei-demo/images/${encodeURIComponent(imageId)}/predict`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model_key: modelKey }),
+      signal,
+    },
+    SEGMENTATION_TIMEOUT_MS,
+  );
+  return parseResponse<NucleiPredictionResponse>(response);
 }
 
 export { ApiError };

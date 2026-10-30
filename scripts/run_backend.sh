@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
 
-if [[ "${CONDA_DEFAULT_ENV:-}" != "sam3" ]]; then
-  echo "Activate the existing Conda environment first: conda activate sam3" >&2
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "Virtual environment not found. Run ./scripts/setup_dev.sh first." >&2
   exit 1
 fi
 
 cd "$ROOT_DIR/backend"
-exec python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+exec "$PYTHON_BIN" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

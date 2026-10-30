@@ -6,14 +6,14 @@ SAM3 Studio is a local FastAPI + React research/demo app for interactive explora
 
 - Backend: FastAPI, Pydantic, Pillow, NumPy
 - Frontend: React, Vite, TypeScript
-- Model integration: direct import from the existing `sam3` Conda environment
+- Model integration: direct import of the `sam3` package installed in a uv-managed `.venv`
 - Runtime model flow: local-only, single-machine, no auth, no database, no external inference service
 
 ## Project Layout
 
 - `backend/`: FastAPI app, typed schemas, SAM3 service, local queue, upload cache
 - `frontend/`: React + Vite TypeScript app and interactive viewer
-- `scripts/`: Conda-aware local setup and run helpers
+- `scripts/`: uv-based local setup and run helpers
 
 ## SAM3 Integration Notes
 
@@ -31,14 +31,9 @@ In product terms, this means:
 
 ## Prerequisites
 
-1. Conda environment `sam3` already exists.
-2. The `sam3` Python package is already installed in that environment.
-3. Node.js and npm are available locally.
-4. Activate the existing environment yourself before setup or running anything:
-
-```bash
-conda activate sam3
-```
+1. [uv](https://docs.astral.sh/uv/) is installed.
+2. Node.js and npm are available locally.
+3. An NVIDIA GPU with a driver that supports CUDA 12.8 (for CPU-only or other CUDA versions, set `TORCH_INDEX_URL` before running setup, e.g. `https://download.pytorch.org/whl/cpu`).
 
 ## Setup
 
@@ -48,7 +43,13 @@ From the repository root:
 ./scripts/setup_dev.sh
 ```
 
-That script only installs dependencies into the currently active `sam3` environment. It does not create a new environment, virtualenv, Poetry env, pipenv env, or uv env.
+That script creates a Python 3.12 uv virtual environment at `.venv/` (if it does not already exist), installs PyTorch, `sam3`, and the backend requirements into it, and runs `npm install` for the frontend. The run scripts use `.venv` directly, so there is nothing to activate.
+
+On HiPerGator, point the uv cache at `/blue` to avoid filling your home quota:
+
+```bash
+export UV_CACHE_DIR=/blue/GROUP/USER/.cache/uv UV_LINK_MODE=copy
+```
 
 ## Optional Backend Configuration
 
@@ -87,7 +88,6 @@ Stage challenge datasets into `CHALLENGE_DATASETS_DIR` if you use them. The temp
 Start the backend in one terminal:
 
 ```bash
-conda activate sam3
 ./scripts/run_backend.sh
 ```
 
@@ -100,6 +100,8 @@ Start the frontend in another terminal:
 ```
 
 Open `http://localhost:5173`.
+
+Or start both together with `./run_studio.sh` (defaults to `dev` mode).
 
 ## Run In Production
 
@@ -128,6 +130,41 @@ For the `faiht.ai` deployment:
 5. If all model workers are busy, the request waits in the in-memory FIFO queue until a worker becomes available.
 6. Inspect returned masks, switch between candidates, and tune overlay opacity.
 
+## BBBC038 Nuclei Demo
+
+The **Nuclei Demo** page shows a label-free pipeline on the 2018 Data Science Bowl (BBBC038) nuclei data: SAM3 annotates `stage1_train` from the text prompt `"blobs"`, SAM3 is LoRA fine-tuned on those pseudo-labels only, and the result is scored on `stage1_test` against `stage1_solution.csv`. `stage1_test` is never used for training, model selection or threshold tuning.
+
+Place `stage1_train.zip`, `stage1_test.zip`, `stage1_train_labels.csv` and `stage1_solution.csv` in the repository root, then run each stage from the repository root:
+
+```bash
+# 1. Extract, check the RLE decoder against the train mask PNGs, decode the test solution
+#    into per-nucleus masks, write the type-stratified 85/15 train/val split and a GT COCO file.
+.venv/bin/python scripts/prepare_bbbc038.py
+
+# 2. SAM3 pseudo-labels for stage1_train (resumable) + quality report vs. ground truth.
+.venv/bin/python scripts/annotate_bbbc038_sam3.py --prompt blobs
+
+# 3. LoRA fine-tuning (extra packages: scripts/requirements-train.txt).
+uv pip install --python .venv/bin/python -r scripts/requirements-train.txt
+sbatch --export=ALL,LABELS=pseudo scripts/slurm/train_bbbc038_lora.sbatch   # trained model
+sbatch --export=ALL,LABELS=gt     scripts/slurm/train_bbbc038_lora.sbatch   # GT upper bound
+
+# 4. Score zero-shot SAM3 and both fine-tuned models on stage1_test.
+.venv/bin/python scripts/evaluate_bbbc038.py            # add --force to recompute predictions
+```
+
+Outputs (all ignored by Git):
+
+- `backend/data/datasets/bbbc038/raw/` – extracted images; `stage1_test/<id>/masks/` holds the decoded solution
+- `backend/data/datasets/bbbc038/split.json` – train/val/test ids, image types and color statistics
+- `backend/data/datasets/bbbc038/sam3_annotations/` – `stage1_train_blobs.coco.json` (RLE + scores), `.manifest.json` (prompt, threshold, checkpoint, timing), `.quality.json`
+- `backend/data/models/bbbc038/sam3_lora_{pseudo,gt}/` – LoRA checkpoints (`checkpoints/best_lora.pt`), `history.json` training curves, `run_summary.json` config
+- `backend/data/models/bbbc038/metrics.json` – per-image, aggregate and per-image-type test metrics (DSB score, F1@0.5, pixel Dice/IoU, count error)
+
+Image types (fluorescent / brightfield / histology) come from color statistics: grayscale images are split by median brightness, colored images are histology. `stage1_test` contains no brightfield images.
+
+The page's live inference reuses the existing worker setup: zero-shot SAM3 runs on the sandbox workers through the shared queue, and each fine-tuned model gets its own single-worker queue whose SAM3 + LoRA model loads on first use.
+
 ## Backend API Summary
 
 - `POST /api/upload`: upload a local image and create a session
@@ -136,6 +173,9 @@ For the `faiht.ai` deployment:
 - `POST /api/sessions/{session_id}/reset-cache`: clear cached embeddings for the session
 - `POST /api/segment/jobs`: enqueue a segmentation job and hold the request open until the queued job completes
 - `GET /api/jobs/{job_id}`: inspect queued/running/completed job status for compatibility or debugging
+- `GET /api/nuclei-demo/images`: list BBBC038 stage1_test images with image type and thumbnail URLs
+- `GET /api/nuclei-demo/metrics`, `GET /api/nuclei-demo/metrics/{image_id}`: aggregate and per-image test metrics
+- `POST /api/nuclei-demo/images/{image_id}/predict`: run a model on a test image and return predicted and ground-truth masks with TP/FP/FN overlays
 
 ## Development Notes
 

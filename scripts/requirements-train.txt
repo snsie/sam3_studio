@@ -1,0 +1,4 @@
+# Extra packages for scripts/finetune_sam3_lora.py (sam3.train imports these).
+torchmetrics>=1.4
+opencv-python-headless>=4.9
+pycocotools>=2.0.7

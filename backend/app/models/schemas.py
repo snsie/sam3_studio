@@ -243,3 +243,73 @@ class ChallengeScoreSummary(BaseModel):
 class LeaderboardResponse(BaseModel):
     challenge_id: ChallengeType | None = None
     entries: list[ChallengeScoreSummary]
+
+
+class NucleiModelKey(StrEnum):
+    TRAINED = "sam3_lora_pseudo"
+    ZERO_SHOT = "sam3_zero_shot"
+    GROUND_TRUTH_TRAINED = "sam3_lora_gt"
+
+
+class NucleiImageItem(BaseModel):
+    image_id: str
+    image_type: str
+    width: int
+    height: int
+    gt_count: int
+    thumbnail_url: str
+    image_url: str
+
+
+class NucleiModelOption(BaseModel):
+    model_key: NucleiModelKey
+    label: str
+    description: str
+    available: bool
+
+
+class NucleiImageListResponse(BaseModel):
+    images: list[NucleiImageItem]
+    image_type_counts: dict[str, int]
+    models: list[NucleiModelOption]
+    prompt: str
+
+
+class NucleiPredictRequest(BaseModel):
+    model_key: NucleiModelKey = NucleiModelKey.TRAINED
+
+
+class NucleiInstance(BaseModel):
+    instance_id: int
+    status: Literal["tp", "fp", "fn", "matched"]
+    area: int
+    bounding_box: list[float]
+    score: float | None = None
+    matched_id: int | None = None
+    iou: float | None = None
+
+
+class NucleiOverlays(BaseModel):
+    prediction: str
+    ground_truth: str
+    ground_truth_outline: str
+    prediction_outline: str
+    comparison: str
+
+
+class NucleiPredictionResponse(BaseModel):
+    image_id: str
+    image_type: str
+    width: int
+    height: int
+    model_key: NucleiModelKey
+    model_label: str
+    prompt: str
+    job_id: str
+    elapsed_seconds: float
+    metrics: dict[str, float | int | list[float]]
+    counts: dict[str, int]
+    overlays: NucleiOverlays
+    predictions: list[NucleiInstance]
+    ground_truth: list[NucleiInstance]
+    warnings: list[str] = Field(default_factory=list)

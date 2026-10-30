@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_challenges import router as challenges_router
 from app.api.routes_leaderboard import router as leaderboard_router
+from app.api.routes_nuclei_demo import router as nuclei_demo_router
 from app.api.routes_samples import router as samples_router
 from app.api.routes_segment import router as segment_router
 from app.api.routes_sessions import router as sessions_router
@@ -20,6 +21,7 @@ from app.core.config import get_settings
 from app.services.challenge_service import ChallengeService
 from app.services.job_queue import InferenceQueue, ModelWorker
 from app.services.leaderboard_service import LeaderboardService
+from app.services.nuclei_demo_service import NucleiDemoService
 from app.services.sam3_runtime import (
     SAM3ModelRuntime,
     is_gpu_capacity_error,
@@ -87,6 +89,9 @@ def create_app() -> FastAPI:
             max_queue_size=settings.sam3_queue_max_size,
         )
         await job_queue.start()
+        # Zero-shot requests share the sandbox SAM3 workers; fine-tuned models get their
+        # own lazily loaded workers on first use.
+        nuclei_demo_service = NucleiDemoService(settings, sam3_service, job_queue)
 
         app.state.settings = settings
         app.state.sam3_service = sam3_service
@@ -94,9 +99,11 @@ def create_app() -> FastAPI:
         app.state.scoring_service = scoring_service
         app.state.leaderboard_service = leaderboard_service
         app.state.job_queue = job_queue
+        app.state.nuclei_demo_service = nuclei_demo_service
         try:
             yield
         finally:
+            await nuclei_demo_service.stop()
             await job_queue.stop()
 
     app = FastAPI(
@@ -124,6 +131,7 @@ def create_app() -> FastAPI:
     app.include_router(sessions_router, prefix=settings.api_prefix)
     app.include_router(challenges_router, prefix=settings.api_prefix)
     app.include_router(leaderboard_router, prefix=settings.api_prefix)
+    app.include_router(nuclei_demo_router, prefix=settings.api_prefix)
 
     if FRONTEND_DIST_DIR.is_dir():
         logger.info("Serving frontend from %s", FRONTEND_DIST_DIR)

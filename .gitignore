@@ -13,3 +13,6 @@ frontend/dist/
 datasets/
 datasets/*
 backend/data/
+# BBBC038 nuclei demo: extracted data, pseudo-labels and model outputs
+backend/data/datasets/bbbc038/raw/
+backend/data/models/

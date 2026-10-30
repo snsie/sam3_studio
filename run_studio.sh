@@ -47,8 +47,10 @@ if [[ -n "${FRONTEND_ORIGINS:-}" ]]; then
   BACKEND_ENV+=("FRONTEND_ORIGINS=${FRONTEND_ORIGINS}")
 fi
 
-if ! command -v conda >/dev/null 2>&1; then
-  echo "Error: conda is required to start the backend."
+VENV_DIR="${ROOT_DIR}/.venv"
+
+if [[ ! -x "${VENV_DIR}/bin/uvicorn" ]]; then
+  echo "Error: uvicorn not found in ${VENV_DIR}. Run ./scripts/setup_dev.sh first."
   exit 1
 fi
 
@@ -96,27 +98,7 @@ kill_port_processes() {
   fi
 }
 
-activate_conda_env() {
-  local conda_base
-  conda_base="$(conda info --base 2>/dev/null)"
-
-  if [[ -z "${conda_base}" ]]; then
-    echo "Error: could not determine the conda base path."
-    exit 1
-  fi
-
-  # shellcheck disable=SC1091
-  source "${conda_base}/etc/profile.d/conda.sh"
-  conda activate sam3
-}
-
-echo "Activating conda environment: sam3..."
-activate_conda_env
-
-if ! command -v uvicorn >/dev/null 2>&1; then
-  echo "Error: uvicorn is not available in the sam3 conda environment."
-  exit 1
-fi
+export PATH="${VENV_DIR}/bin:${PATH}"
 
 if [[ "${MODE}" == "prod" ]]; then
   echo "Building frontend for production..."

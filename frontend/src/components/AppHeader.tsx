@@ -6,7 +6,7 @@ import {
   type SandboxHeaderState,
 } from "../headerContext";
 
-type AppPage = "sandbox" | "challenges" | "leaderboard";
+type AppPage = "sandbox" | "challenges" | "leaderboard" | "nuclei" | "pipeline";
 
 interface AppHeaderProps {
   activePage: AppPage;
@@ -20,6 +20,8 @@ const PAGE_OPTIONS: Array<{ id: AppPage; label: string }> = [
   { id: "sandbox", label: "Sandbox" },
   { id: "challenges", label: "Challenges" },
   { id: "leaderboard", label: "Leaderboard" },
+  { id: "nuclei", label: "Nuclei Demo" },
+  { id: "pipeline", label: "Pipeline" },
 ];
 
 function getLeaderboardStatusCopy(leaderboardState: LeaderboardHeaderState) {
@@ -93,6 +95,16 @@ export function AppHeader({
               </button>
             );
           })}
+        </div>
+      </section>
+    ) : activePage === "nuclei" ? (
+      <section className="app-header-pane app-header-nuclei-pane">
+        <div className="app-header-pane-copy">
+          <span className="section-kicker">Nuclei Demo</span>
+          <h2>SAM3 pseudo-labels → trained model</h2>
+          <p className="app-header-pane-note">
+            SAM3 + "blobs" → pseudo-labels → LoRA fine-tune → scored on DSB 2018 stage1_test
+          </p>
         </div>
       </section>
     ) : null;

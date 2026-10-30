@@ -8,6 +8,8 @@ import type {
 } from "./headerContext";
 import { ChallengesPage } from "./pages/ChallengesPage";
 import { LeaderboardPage } from "./pages/LeaderboardPage";
+import { NucleiDemoPage } from "./pages/NucleiDemoPage";
+import { PipelinePage } from "./pages/PipelinePage";
 import { SandboxPage } from "./pages/SandboxPage";
 
 export default function App() {
@@ -38,6 +40,12 @@ export default function App() {
           isActive={activePage === "leaderboard"}
           onHeaderStateChange={setLeaderboardState}
         />
+      </section>
+      <section className={`page-view${activePage === "nuclei" ? " is-active" : ""}`} hidden={activePage !== "nuclei"}>
+        <NucleiDemoPage isActive={activePage === "nuclei"} />
+      </section>
+      <section className={`page-view${activePage === "pipeline" ? " is-active" : ""}`} hidden={activePage !== "pipeline"}>
+        <PipelinePage isActive={activePage === "pipeline"} onOpenNucleiDemo={() => setActivePage("nuclei")} />
       </section>
     </div>
   );

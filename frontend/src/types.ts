@@ -209,3 +209,181 @@ export interface ChallengeImageMaskState {
   stored: boolean;
   stored_at: string | null;
 }
+
+export type NucleiModelKey = "sam3_lora_pseudo" | "sam3_zero_shot" | "sam3_lora_gt";
+export type NucleiImageType = "fluorescent" | "brightfield" | "histology";
+
+export interface NucleiImageItem {
+  image_id: string;
+  image_type: NucleiImageType;
+  width: number;
+  height: number;
+  gt_count: number;
+  thumbnail_url: string;
+  image_url: string;
+}
+
+export interface NucleiModelOption {
+  model_key: NucleiModelKey;
+  label: string;
+  description: string;
+  available: boolean;
+}
+
+export interface NucleiImageListResponse {
+  images: NucleiImageItem[];
+  image_type_counts: Record<NucleiImageType, number>;
+  models: NucleiModelOption[];
+  prompt: string;
+}
+
+export interface NucleiImageMetrics {
+  dsb_score: number;
+  f1_at_50: number;
+  precision_at_50: number;
+  recall_at_50: number;
+  pixel_dice: number;
+  pixel_iou: number;
+  instance_mean_iou: number;
+  gt_count: number;
+  pred_count: number;
+  count_error: number;
+  abs_count_error: number;
+  ap_per_threshold: number[];
+}
+
+export interface NucleiAggregateMetrics {
+  image_count: number;
+  dsb_score?: number;
+  f1_at_50?: number;
+  precision_at_50?: number;
+  recall_at_50?: number;
+  pixel_dice?: number;
+  pixel_iou?: number;
+  instance_mean_iou?: number;
+  abs_count_error?: number;
+  mean_count_error?: number;
+  relative_abs_count_error?: number;
+  gt_count_total?: number;
+  pred_count_total?: number;
+  ap_per_threshold?: number[];
+}
+
+export interface NucleiModelMetrics {
+  label: string;
+  description: string;
+  lora_checkpoint: string | null;
+  aggregate: NucleiAggregateMetrics;
+  by_image_type: Record<NucleiImageType, NucleiAggregateMetrics>;
+  inference_seconds_mean: number;
+}
+
+export interface NucleiEvalScores {
+  dsb_score: number;
+  f1_at_50: number;
+  pixel_dice: number;
+  pixel_iou: number;
+  abs_count_error: number;
+}
+
+export interface NucleiTrainingEpoch {
+  epoch: number;
+  train_loss: number;
+  train_seconds: number;
+  epoch_seconds: number;
+  val: NucleiEvalScores;
+  val_diagnostic?: NucleiEvalScores;
+}
+
+export interface NucleiTrainingSummary {
+  history: NucleiTrainingEpoch[];
+  best_epoch: number | null;
+  selection_metric: string | null;
+  training_seconds: number | null;
+  config: Record<string, string | number | boolean | null>;
+}
+
+export interface NucleiPseudoLabelSummary {
+  quality: {
+    overall: NucleiAggregateMetrics;
+    by_image_type: Record<string, NucleiAggregateMetrics>;
+    by_split: Record<string, NucleiAggregateMetrics>;
+  };
+  annotation: {
+    prompt: string;
+    confidence_threshold: number;
+    checkpoint_path: string | null;
+    device: string;
+    gpu: string | null;
+    images: number;
+    annotations: number;
+    images_without_detections: number;
+    images_at_query_cap: number;
+    timing: {
+      inference_seconds_total: number;
+      inference_seconds_mean: number;
+      inference_seconds_median: number;
+      wall_seconds_total: number;
+    };
+  };
+}
+
+export interface NucleiMetricsSummary {
+  generated_at: string;
+  prompt: string;
+  confidence_threshold: number;
+  test_set: {
+    name: string;
+    ground_truth: string;
+    images: number;
+    nuclei: number;
+    image_types: Record<NucleiImageType, number>;
+  };
+  split_counts: Record<"train" | "val" | "test", Record<NucleiImageType, number>>;
+  metric_definitions: Record<string, string>;
+  iou_thresholds: number[];
+  models: Partial<Record<NucleiModelKey, NucleiModelMetrics>>;
+  training: Partial<Record<NucleiModelKey, NucleiTrainingSummary | null>>;
+  pseudo_labels: NucleiPseudoLabelSummary | null;
+}
+
+export interface NucleiImageMetricsResponse {
+  image_id: string;
+  image_type: NucleiImageType;
+  gt_count: number;
+  models: Partial<Record<NucleiModelKey, NucleiImageMetrics & { inference_seconds: number }>>;
+}
+
+export interface NucleiInstance {
+  instance_id: number;
+  status: "tp" | "fp" | "fn" | "matched";
+  area: number;
+  bounding_box: number[];
+  score: number | null;
+  matched_id: number | null;
+  iou: number | null;
+}
+
+export interface NucleiPredictionResponse {
+  image_id: string;
+  image_type: NucleiImageType;
+  width: number;
+  height: number;
+  model_key: NucleiModelKey;
+  model_label: string;
+  prompt: string;
+  job_id: string;
+  elapsed_seconds: number;
+  metrics: NucleiImageMetrics;
+  counts: { tp: number; fp: number; fn: number; pred: number; gt: number };
+  overlays: {
+    prediction: string;
+    ground_truth: string;
+    ground_truth_outline: string;
+    prediction_outline: string;
+    comparison: string;
+  };
+  predictions: NucleiInstance[];
+  ground_truth: NucleiInstance[];
+  warnings: string[];
+}
